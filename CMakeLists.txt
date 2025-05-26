@@ -46,9 +46,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 
 # --- Add your library/executable, in this case a Python extension module ---
-# We'll call the library "_bite" so that scikit-build produces _bite.<ext> 
-pybind11_add_module(_bite
-    bitepy/_bite.cpp
+# We'll call the library "_bitepy" so that scikit-build produces _bitepy.<ext> 
+pybind11_add_module(_bitepy
+    bitepy/_bitepy.cpp
     bitepy/cpp_source_submodule/bite/src/Simulation.cpp
     bitepy/cpp_source_submodule/bite/src/GeneralStageProblem.cpp
     bitepy/cpp_source_submodule/bite/src/LimitOrderQueue.cpp
@@ -65,7 +65,7 @@ pybind11_add_module(_bite
     bitepy/cpp_source_submodule/bite/src/BalancingOrder.cpp
 )
 
-set_target_properties(_bite
+set_target_properties(_bitepy
     PROPERTIES
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED YES
@@ -74,14 +74,14 @@ set_target_properties(_bite
 
 # OLD
 # --- Include directories ---
-# target_include_directories(_bite
+# target_include_directories(_bitepy
 #     PRIVATE
-#         ${PROJECT_SOURCE_DIR}/_bite/include
+#         ${PROJECT_SOURCE_DIR}/_bitepy/include
 #         /opt/homebrew/include
 #         /Library/gurobi1200/macos_universal2/include
 # )
 
-# target_link_directories(_bite
+# target_link_directories(_bitepy
 #     PRIVATE
 #         /Library/gurobi1200/macos_universal2/lib
 # )
@@ -109,14 +109,14 @@ set_target_properties(_bite
 # endif()
 
 # Then add them to your target:
-target_include_directories(_bite PRIVATE
+target_include_directories(_bitepy PRIVATE
     "${PROJECT_SOURCE_DIR}/bitepy/cpp_source_submodule/bite/src"
     #"${GUROBI_INCLUDE_DIR}"
 )
 
-#target_link_libraries(_bite PRIVATE "${GUROBI_LIB}")
+#target_link_libraries(_bitepy PRIVATE "${GUROBI_LIB}")
 
-target_link_libraries(_bite
+target_link_libraries(_bitepy
     PRIVATE
         pybind11::module  # pybind11
         # gurobi_c++
@@ -125,35 +125,35 @@ target_link_libraries(_bite
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     # --- Common Flags for GCC and Clang based compilers ---
-    target_compile_options(_bite PRIVATE
+    target_compile_options(_bitepy PRIVATE
         -O3          # Optimization level
         -funroll-loops # Loop unrolling optimization
         -flto        # Link-time optimization (compile part)
         -std=c++17   # Set C++ standard
     )
-    target_link_options(_bite PRIVATE
+    target_link_options(_bitepy PRIVATE
         -flto        # Link-time optimization (link part)
     )
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     # --- MSVC Flags ---
-    target_compile_options(_bite PRIVATE
+    target_compile_options(_bitepy PRIVATE
         /O2         # Optimization level (MSVC)
         /GL         # Whole program optimization (LTO compile part for MSVC)
         # /arch:AVX2  # Be careful with specific instruction sets, ensure compatibility if uncommented
     )
-    target_link_options(_bite PRIVATE
+    target_link_options(_bitepy PRIVATE
         /LTCG       # Link-time code generation (LTO link part for MSVC)
     )
 endif()
 
-# Tell CMake to name the target _bite.<so/pyd>: (does not work)
-# set_target_properties(_bite PROPERTIES
+# Tell CMake to name the target _bitepy.<so/pyd>: (does not work)
+# set_target_properties(_bitepy PROPERTIES
 #     PREFIX "${Python3_MODULE_PREFIX}"
 #     SUFFIX "${Python3_MODULE_EXTENSION}"
 # )
 
-install(TARGETS _bite
+install(TARGETS _bitepy
         COMPONENT python
         LIBRARY DESTINATION bitepy  # or '.'
 )
@@ -188,8 +188,8 @@ install(TARGETS _bite
 #         elseif(Python3_VERSION_MINOR EQUAL 13)
 #             set(CP_TAG "3.13")
 #         endif()
-#         set(SIM_LIB_PATH "${PROJECT_SOURCE_DIR}/libs/_bite_win_py${CP_TAG}.dll")
-#         set(SIM_IMPLIB_PATH "${PROJECT_SOURCE_DIR}/libs/_bite_win_py${CP_TAG}.lib")
+#         set(SIM_LIB_PATH "${PROJECT_SOURCE_DIR}/libs/_bitepy_win_py${CP_TAG}.dll")
+#         set(SIM_IMPLIB_PATH "${PROJECT_SOURCE_DIR}/libs/_bitepy_win_py${CP_TAG}.lib")
 #     else()
 #         message(FATAL_ERROR "Unsupported Python version on Windows")
 #     endif()
@@ -208,7 +208,7 @@ install(TARGETS _bite
 #         elseif(Python3_VERSION_MINOR EQUAL 13)
 #             set(CP_TAG "3.13")
 #         endif()
-#         set(SIM_LIB_PATH "${PROJECT_SOURCE_DIR}/libs/_bite_mac_py${CP_TAG}.dylib")
+#         set(SIM_LIB_PATH "${PROJECT_SOURCE_DIR}/libs/_bitepy_mac_py${CP_TAG}.dylib")
 #     else()
 #         message(FATAL_ERROR "Unsupported Python version on macOS")
 #     endif()
@@ -227,7 +227,7 @@ install(TARGETS _bite
 #         elseif(Python3_VERSION_MINOR EQUAL 13)
 #             set(CP_TAG "3.13")
 #         endif()
-#         set(SIM_LIB_PATH "${PROJECT_SOURCE_DIR}/libs/_bite_linux_py${CP_TAG}.so")
+#         set(SIM_LIB_PATH "${PROJECT_SOURCE_DIR}/libs/_bitepy_linux_py${CP_TAG}.so")
 #     else()
 #         message(FATAL_ERROR "Unsupported Python version on Linux")
 #     endif()
@@ -252,31 +252,31 @@ install(TARGETS _bite
 # endif()
 
 # # --- Build the Python wrapper ---
-# add_library(_bite SHARED
-#     bite/_bite.cpp
+# add_library(_bitepy SHARED
+#     bite/_bitepy.cpp
 # )
 
-# set_target_properties(_bite
+# set_target_properties(_bitepy
 #     PROPERTIES
 #         CXX_STANDARD 17
 #         CXX_STANDARD_REQUIRED YES
 #         CXX_EXTENSIONS NO
 # )
 
-# target_include_directories(_bite PRIVATE
+# target_include_directories(_bitepy PRIVATE
 #     "${PROJECT_SOURCE_DIR}/include"
 # )
 
 # # Remove the default prefix to avoid a "lib" being added on some systems
-# set_target_properties(_bite PROPERTIES PREFIX "")
+# set_target_properties(_bitepy PROPERTIES PREFIX "")
 
 # # Set the output name to include the system and Python version.
 # # Python3_VERSION is provided by the Python3 package.
 # string(REGEX MATCH "^[0-9]+\\.[0-9]+" PYTHON3_VERSION_SHORT ${Python3_VERSION})
-# set_target_properties(_bite PROPERTIES OUTPUT_NAME "_bite_${PLATFORM}_py${PYTHON3_VERSION_SHORT}")
+# set_target_properties(_bitepy PROPERTIES OUTPUT_NAME "_bitepy_${PLATFORM}_py${PYTHON3_VERSION_SHORT}")
 
 # # Link the Python module with the precompiled simulation library.
-# target_link_libraries(_bite
+# target_link_libraries(_bitepy
 #     PRIVATE
 #         pybind11::module
 #         bite_lib
@@ -284,28 +284,28 @@ install(TARGETS _bite
 
 # # --- Compiler-specific options ---
 # if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-#     target_compile_options(_bite PRIVATE
+#     target_compile_options(_bitepy PRIVATE
 #         -O3
 #         -march=native
 #         -funroll-loops
 #         -flto
 #         -std=c++17
 #     )
-#     target_link_options(_bite PRIVATE
+#     target_link_options(_bitepy PRIVATE
 #         -flto
 #     )
 # elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-#     target_compile_options(_bite PRIVATE
+#     target_compile_options(_bitepy PRIVATE
 #         /O2
 #         /GL
 #         /arch:AVX2 
 #     )
-#     target_link_options(_bite PRIVATE
+#     target_link_options(_bitepy PRIVATE
 #         /LTCG
 #     )
 # endif()
 
-# install(TARGETS _bite
+# install(TARGETS _bitepy
 #         COMPONENT python
 #         LIBRARY DESTINATION bite
 # )

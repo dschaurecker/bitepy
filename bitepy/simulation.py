@@ -15,10 +15,10 @@ from datetime import timedelta
 from tqdm import tqdm
 
 try:
-    from ._bite import Simulation_cpp
+    from ._bitepy import Simulation_cpp
 except ImportError as e:
     raise ImportError(
-        "Failed to import _bite module. Ensure that the C++ extension is correctly built and installed."
+        "Failed to import _bitepy module. Ensure that the C++ extension is correctly built and installed."
     ) from e
 
 class Simulation:
