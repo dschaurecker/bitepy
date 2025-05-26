@@ -20,7 +20,7 @@ namespace py = pybind11;
 using simParams = SimulationParameters;
 using sim = Simulation;
 
-PYBIND11_MODULE(_bite, m) {
+PYBIND11_MODULE(_bitepy, m) {
     m.doc() = "pybind11 wrapper for the Simulation C++ code";
     // Params class
     // **Expose SimulationParameters class**
