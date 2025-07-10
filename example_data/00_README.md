@@ -30,25 +30,15 @@ The following table describes the columns present in the `orderbook_2022-01-02.c
   
 
 | Column Name | Data Type | Description | Notes |
-
 | :--- | :--- | :--- | :--- |
-
-|  *(unnamed)*  |  `Integer`  | A unique identifier. | Corresponds to the `ID` field in the EPEX specification |
-
-|  `initial`  |  `Integer`  | A unique identifier for the order. | Corresponds to the `initialID` field in the EPEX specification. |
-
-|  `side`  |  `String`  | The side of the order book. | Can be `BUY` or `SELL`. |
-
-|  `start`  |  `UTC Timestamp`  | The start of the delivery period for the order. | Formatted as `YYYY-MM-DDTHH:MM:SSZ`. |
-
-|  `transaction`  |  `UTC Timestamp`  | The exact timestamp when the order was submitted (transacted). | Formatted as `YYYY-MM-DDTHH:MM:SS.sssZ`. |
-
-|  `validity`  |  `UTC Timestamp`  | A timestamp indicating the expiration of the order. | In the sample data, some fields are empty, which signifies no expiry. Formatted as `YYYY-MM-DDTHH:MM:SS.sssZ`. |
-
-|  `price`  |  `Float`  | The price of the order in EUR/MWh. | Negative prices are possible in electricity markets. |
-
-|  `quantity`  |  `Float`  | The volume of the order in MWh, in increments of the minimum order volume of 0.1 MWh. | Represents the amount of electricity being bought or sold; the value is always positive. |
-
+| *(unnamed)* | `Integer` | A unique identifier. | Corresponds to the `ID` field in the EPEX specification. |
+| `initial` | `Integer` | A unique identifier for the order. | Corresponds to the `initialID` field in the EPEX specification. |
+| `side` | `String` | The side of the order book. | Can be `BUY` or `SELL`. |
+| `start` | `UTC Timestamp` | The start of the delivery period for the order. | Formatted as `YYYY-MM-DDTHH:MM:SSZ`. |
+| `transaction` | `UTC Timestamp` | The exact timestamp when the order was submitted (transacted). | Formatted as `YYYY-MM-DDTHH:MM:SS.sssZ`. |
+| `validity` | `UTC Timestamp` | A timestamp indicating the expiration of the order. | In the sample data, some fields are empty, which signifies no expiry. Formatted as `YYYY-MM-DDTHH:MM:SS.sssZ`. |
+| `price` | `Float` | The price of the order in EUR/MWh. | Negative prices are possible. |
+| `quantity` | `Float` | The volume of the order in MWh, in increments of the minimum order volume of 0.1 MWh. | Represents the amount of electricity being bought or sold; the value is always positive. |
   
 
 ### Example Row
