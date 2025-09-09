@@ -174,6 +174,38 @@ PYBIND11_MODULE(_bitepy, m) {
         .def("writeOrderBinFromPandas", &sim::writeOrderBinFromPandas)
         .def("writeOrderBinFromCSV", &sim::writeOrderBinFromCSV)
 
+        // Limit order submission functionality
+        .def("submitLimitOrdersAndGetMatches", [](Simulation &self, 
+                const std::vector<std::string>& transaction_times,
+                const std::vector<double>& prices,
+                const std::vector<double>& volumes,
+                const std::vector<std::string>& sides,
+                const std::vector<std::string>& delivery_times) {
+            self.submitLimitOrdersAndGetMatches(transaction_times, prices, volumes, sides, delivery_times);
+            // Return empty list since this method no longer returns matches directly
+            return py::list();
+        }, py::arg("transaction_times"), py::arg("prices"), py::arg("volumes"), py::arg("sides"), py::arg("delivery_times"))
+        
+        .def("getLimitOrderMatches", [](Simulation &self) {
+            auto matches = self.getLimitOrderMatches();
+            py::list matchList;
+            for (const auto &match : matches) {
+                py::dict pyMatch;
+                pyMatch["submitted_order_id"] = match.submitted_order_id;
+                pyMatch["matched_order_id"] = match.matched_order_id;
+                pyMatch["match_timestamp"] = match.formatMatchTimestamp();
+                pyMatch["delivery_hour"] = match.formatDeliveryHour();
+                pyMatch["match_price"] = match.match_price;
+                pyMatch["match_volume"] = match.match_volume / 10.;
+                pyMatch["submitted_order_side"] = match.submitted_order_side;
+                pyMatch["existing_order_side"] = match.existing_order_side;
+                matchList.append(pyMatch);
+            }
+            return matchList;
+        })
+
+        .def("clearLimitOrderMatches", &Simulation::clearLimitOrderMatches)
+
         // .def("loadForecastMapFromCSV", &Simulation::loadForecastMapFromCSV)
         // .def("loadForecastMapFromPandas", &Simulation::loadForecastMapFromPandas)
 

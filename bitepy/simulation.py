@@ -548,3 +548,127 @@ class Simulation:
             vol_price_list["delivery_hour"] = pd.to_datetime(vol_price_list["delivery_hour"], utc=True)
             
         return vol_price_list
+
+    def submit_limit_orders(self, df: pd.DataFrame):
+        """
+        Submit a list of limit orders and track their matches without battery optimization.
+
+        This method validates input data and queues the limit orders for submission at specified times.
+        The orders will be submitted during the normal simulation run without triggering battery optimization.
+
+        Args:
+            df (pd.DataFrame): A DataFrame containing the limit orders to be submitted.
+                The DataFrame must have the following columns:
+                    - transaction_time: The time when the order should be submitted (timezone aware, up to millisecond precision).
+                    - price: The price of the limit order (€/MWh).
+                    - volume: The volume of the limit order (MWh, positive for buy, negative for sell).
+                    - side: The side of the order ('buy' or 'sell').
+                    - delivery_time: The delivery time for the order (timezone aware, required).
+
+        Processing Steps:
+            - Validates input data format and required columns.
+            - Ensures timezone awareness and proper formatting of timestamps.
+            - Queues the limit orders for submission during simulation execution.
+            - Orders are processed without triggering battery optimization.
+
+        Returns:
+            None: This method queues orders but does not return match information.
+                After running the simulation, use get_limit_order_matches() to retrieve match details.
+
+        Note:
+            Call this method to queue own limit orders, then run the simulation to process them and collect matches.
+            Use get_limit_order_matches() after simulation to retrieve final match results.
+        """
+        
+        # Validate input DataFrame
+        required_columns = ['transaction_time', 'price', 'volume', 'side', 'delivery_time']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+        
+        # Check if transaction_time is timezone aware
+        if df["transaction_time"].dt.tz is None:
+            raise ValueError("transaction_time must be timezone aware")
+        if df["transaction_time"].isna().any():
+            raise ValueError("transaction_time cannot contain NaT values - all transaction times are required")
+            
+        # Check if delivery_time is timezone aware and has no NaT values
+        if df["delivery_time"].dt.tz is None:
+            raise ValueError("delivery_time must be timezone aware")
+        if df["delivery_time"].isna().any():
+            raise ValueError("delivery_time cannot contain NaT values - all delivery times are required")
+
+        # check that the delivery time is a full hour exactly
+        if (df["delivery_time"].dt.minute != 0).any():
+            raise ValueError("delivery_time must be a full hour exactly for hourly products")
+
+        # volume must be > 0
+        if df["volume"].le(0).any():
+            raise ValueError("volume must be > 0")
+        
+        # Convert to UTC
+        df = df.copy()
+        df["transaction_time"] = df["transaction_time"].dt.tz_convert("UTC")
+        df["delivery_time"] = df["delivery_time"].dt.tz_convert("UTC")
+        
+        # Validate side column
+        valid_sides = {'buy', 'sell', 'Buy', 'Sell', 'BUY', 'SELL'}
+        invalid_sides = df["side"].unique()
+        invalid_sides = [side for side in invalid_sides if side not in valid_sides]
+        if invalid_sides:
+            raise ValueError(f"Invalid side values: {invalid_sides}. Must be one of: {valid_sides}")
+        
+        # Normalize side values to 'Buy'/'Sell'
+        df["side"] = df["side"].str.capitalize()
+        
+        # Convert timestamps to ISO format
+        df["transaction_time"] = df["transaction_time"].dt.tz_localize(None).dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
+        df["delivery_time"] = df["delivery_time"].dt.tz_localize(None).dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+        
+        # Prepare data for C++ function
+        transaction_times = df["transaction_time"].to_numpy(dtype='str').tolist()
+        prices = df["price"].to_numpy(dtype=np.float64).tolist()
+        volumes = df["volume"].to_numpy(dtype=np.float64).tolist()
+        sides = df["side"].to_numpy(dtype='str').tolist()
+        delivery_times = df["delivery_time"].to_numpy(dtype='str').tolist()
+        
+        # Call C++ function to submit limit orders (no return value)
+        self._sim_cpp.submitLimitOrdersAndGetMatches(transaction_times, prices, volumes, sides, delivery_times)
+    
+    def get_limit_order_matches(self):
+        """
+        Get the limit order matches collected during simulation using the forecast tracking mechanism.
+
+        This method retrieves match information for submitted limit orders that were processed
+        during the simulation run. The orders are tracked using the forecast flag system.
+
+        Processing Steps:
+            - Retrieves match data from the C++ simulation backend.
+            - Converts timestamps to timezone-aware datetime objects.
+            - Clears the internal match storage after retrieval.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing information about which limit orders were matched against which existing orders.
+                The DataFrame contains the following columns:
+                    - submitted_order_id: The ID of the submitted limit order.
+                    - matched_order_id: The ID of the existing order that was matched.
+                    - match_timestamp: The timestamp when the match occurred.
+                    - delivery_hour: The delivery hour for the matched order.
+                    - match_price: The price at which the orders were matched, i.e., the price of the existing (partially) matched order (€/MWh).
+                    - match_volume: The volume that was matched (MWh).
+                    - submitted_order_side: The side of the submitted order ('buy' or 'sell').
+                    - existing_order_side: The side of the existing order ('buy' or 'sell').
+        """
+        matches = self._sim_cpp.getLimitOrderMatches()
+        matches_df = pd.DataFrame(matches)
+        
+        # Convert timestamps to datetime if not empty
+        if not matches_df.empty:
+            matches_df["match_timestamp"] = pd.to_datetime(matches_df["match_timestamp"], utc=True)
+            matches_df["delivery_hour"] = pd.to_datetime(matches_df["delivery_hour"], utc=True)
+        else:
+            print("No limit order matches to return.")
+
+        self._sim_cpp.clearLimitOrderMatches() # clear existing matches
+        
+        return matches_df
