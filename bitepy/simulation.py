@@ -23,36 +23,42 @@ except ImportError as e:
 
 class Simulation:
     def __init__(self, start_date: pd.Timestamp, end_date: pd.Timestamp,
+                 trading_start_date: pd.Timestamp=None,
                  storage_max=10.,
                  lin_deg_cost=4.,
                  loss_in=0.95,
                  loss_out=0.95,
                  trading_fee=0.09,
                  num_stor_states=11,
+                 trading_delay=0,
                  tec_delay=0,
                  fixed_solve_time=0,
                  solve_frequency=0.,
-                 withdraw_max=10.,
-                 inject_max=10.):
+                 withdraw_max=5.,
+                 inject_max=5.,
+                 log_transactions=False,):
                 #  forecast_horizon_start=10*60,
                 #  forecast_horizon_end=75):
         """
         Initialize a Simulation instance.
 
         Args:
-            start_date (pd.Timestamp): The start datetime of the simulation. Must be timezone aware.
-            end_date (pd.Timestamp): The end datetime of the simulation. Must be timezone aware.
+            start_date (pd.Timestamp): The start datetime of the simulation, i.e. which products are loaded into the simulation. Must be timezone aware.
+            end_date (pd.Timestamp): The end datetime of the simulation, i.e. which products are loaded into the simulation. Must be timezone aware.
+            trading_start_date (pd.Timestamp, optional): The start datetime of the trading, i.e. when the trading starts. Must be timezone aware. If None, the trading starts at the same time as the start_date.
             storage_max (float, optional): The maximum storage capacity of the storage unit (MWh). Default is 10.0.
             lin_deg_cost (float, optional): The linear degradation cost of the storage unit (€/MWh). Default is 4.0.
             loss_in (float, optional): The injection efficiency of the storage unit (0-1]. Default is 0.95.
             loss_out (float, optional): The withdrawal efficiency of the storage unit (0-1]. Default is 0.95.
             trading_fee (float, optional): The trading fee for the exchange (€/MWh). Default is 0.09.
             num_stor_states (int, optional): The number of storage states for dynamic programming. Default is 11.
+            trading_delay (int, optional): The trading delay of the storage unit, i.e., when to start trading all new products after gate opening. (min, >= 0 and < 480 mins (8 hours)). Default is 0.
             tec_delay (int, optional): The technical delay of the storage unit (ms, >= 0). Default is 0.
             fixed_solve_time (int, optional): The fixed solve time for dynamic programming (ms, >= 0 or -1 for realistic solve times). Default is 0.
             solve_frequency (float, optional): The frequency at which the dynamic programming solver is run (min). Default is 0.0.
-            withdraw_max (float, optional): The maximum withdrawal power of the storage unit (MW). Default is 10.0.
-            inject_max (float, optional): The maximum injection power of the storage unit (MW). Default is 10.0.
+            withdraw_max (float, optional): The maximum withdrawal power of the storage unit (MW). Default is 5.0.
+            inject_max (float, optional): The maximum injection power of the storage unit (MW). Default is 5.0.
+            log_transactions (bool, optional): If True, we run the simulation only to log transactions data of the market, no optimization is performed. Default is False.
         """
         # forecast_horizon_start (int, optional): The start of the forecast horizon (min). Default is 600.
         # forecast_horizon_end (int, optional): The end of the forecast horizon (min). Default is 75.
@@ -60,6 +66,10 @@ class Simulation:
         # write all the assertions
         if start_date >= end_date:
             raise ValueError("start_date must be before end_date")
+        if trading_start_date is None:
+            trading_start_date = start_date
+        if trading_start_date >= end_date:
+            raise ValueError("trading_start_date must be before end_date")
         if storage_max < 0:
             raise ValueError("storage_max must be >= 0")
         if lin_deg_cost < 0:
@@ -83,6 +93,8 @@ class Simulation:
             raise ValueError("withdraw_max must be > 0")
         if inject_max <= 0:
             raise ValueError("inject_max must be > 0")
+        if trading_delay < 0 or trading_delay >= 8*60:
+            raise ValueError("trading_delay must be >= 0 and < 480 mins (8 hours)")
         # if forecast_horizon_start < 0:
         #     raise ValueError("forecast_horizon_start must be >= 0")
         # if forecast_horizon_end < 0:
@@ -103,6 +115,8 @@ class Simulation:
         self._sim_cpp.params.dpFreq = solve_frequency
         self._sim_cpp.params.withdrawMax = withdraw_max
         self._sim_cpp.params.injectMax = inject_max
+        self._sim_cpp.params.minuteDelay = trading_delay
+        self._sim_cpp.params.logTransactions = log_transactions
         # self._sim_cpp.params.foreHorizonStart = forecast_horizon_start
         # self._sim_cpp.params.foreHorizonEnd = forecast_horizon_end
 
@@ -116,6 +130,7 @@ class Simulation:
         self._sim_cpp.params.startDay = start_date.day
         self._sim_cpp.params.startYear = start_date.year
         self._sim_cpp.params.startHour = start_date.hour
+        self._sim_cpp.params.startMinute = start_date.minute
         if end_date.tzinfo is None:
             raise ValueError("end_date must be timezone aware")
         end_date = end_date.astimezone(pytz.utc)
@@ -123,6 +138,17 @@ class Simulation:
         self._sim_cpp.params.endDay = end_date.day
         self._sim_cpp.params.endYear = end_date.year
         self._sim_cpp.params.endHour = end_date.hour
+        self._sim_cpp.params.endMinute = end_date.minute
+
+        # Set trading start date
+        if trading_start_date.tzinfo is None:
+            raise ValueError("trading_start_date must be timezone aware")
+        trading_start_date = trading_start_date.astimezone(pytz.utc)
+        self._sim_cpp.params.tradingStartMonth = trading_start_date.month
+        self._sim_cpp.params.tradingStartDay = trading_start_date.day
+        self._sim_cpp.params.tradingStartYear = trading_start_date.year
+        self._sim_cpp.params.tradingStartHour = trading_start_date.hour
+        self._sim_cpp.params.tradingStartMinute = trading_start_date.minute
 
     def add_bin_to_orderqueue(self, bin_data: str):
         """
@@ -219,19 +245,26 @@ class Simulation:
         Returns:
             list: A list of file paths for each day's binary order book file.
         """
-        start_date_utc = start_date.tz_convert('UTC')
-        end_date_utc = end_date.tz_convert('UTC')
+        # convert dates to utc time
+        start_date_berlin = start_date.tz_convert('Europe/Berlin') # convert to tz in which the lob files are segemented
+        end_date_berlin = end_date.tz_convert('Europe/Berlin') # convert to tz in which the lob files are segemented
 
+        # round up to midnight
+        end_date_berlin_round_up = end_date_berlin.replace(hour=23, minute=59, second=59)
+        
         if base_path[-1] != '/':
             base_path += '/'
         base_path += "orderbook_"
 
+        # Generate paths for each day within the date range
         paths = []
-        current_date = start_date_utc
-        while current_date < end_date_utc + timedelta(days=1):
+        
+        current_date = start_date_berlin - timedelta(days=1) # include the day before the start date to ensure that all orders submitted with delivery on first day are included
+        while current_date < end_date_berlin_round_up:
             path = f"{base_path}{current_date.strftime('%Y-%m-%d')}.bin"
             paths.append(path)
             current_date += timedelta(days=1)
+        
         return paths
     
     def run(self, data_path: str, verbose: bool = True):
@@ -247,30 +280,94 @@ class Simulation:
         Processing Steps:
             - Retrieve the list of binary file paths for the simulation period.
             - Iterate through each day's data, add the file to the order queue, and run the simulation for that day.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing the transactions if log_transactions is True, otherwise None.
+
         """
         start_date = pd.Timestamp(year=self._sim_cpp.params.startYear,
                                   month=self._sim_cpp.params.startMonth,
                                   day=self._sim_cpp.params.startDay,
                                   hour=self._sim_cpp.params.startHour,
+                                  minute=self._sim_cpp.params.startMinute,
                                   tz="UTC")
         end_date = pd.Timestamp(year=self._sim_cpp.params.endYear,
                                 month=self._sim_cpp.params.endMonth,
                                 day=self._sim_cpp.params.endDay,
                                 hour=self._sim_cpp.params.endHour,
+                                minute=self._sim_cpp.params.endMinute,
                                 tz="UTC")
         lob_paths = self.get_data_bins_for_each_day(data_path, start_date, end_date)
 
+        transactions = pd.DataFrame()
+
         num_days = len(lob_paths)
-        print("The simulation will iterate over", num_days, "files.")
+        if verbose: print("The simulation will iterate over", num_days, "files.")
 
         with tqdm(total=num_days, desc="Simulated Days", unit="%", ncols=120, disable=not verbose) as pbar:
             for i, path in enumerate(lob_paths):
                 pbar.set_description(f"Currently simulating {path.split('/')[-1]} ... ")
                 self.add_bin_to_orderqueue(path)
                 self.run_one_day(i == len(lob_paths) - 1)
+                if self._sim_cpp.params.logTransactions:
+                    transactions = pd.concat([transactions, self.group_transactions(self.get_transactions())])
                 pbar.update(1)
 
-        print("Simulation finished.")
+        if verbose: print("Simulation finished.")
+
+        if self._sim_cpp.params.logTransactions and not transactions.empty:
+            return transactions
+
+    def group_transactions(self, transactions: pd.DataFrame):
+        """
+        Parameters
+        ----------
+        transactions : pd.DataFrame
+            A DataFrame containing the transactions to be grouped.
+
+        Processing Steps
+        ----------------
+        - We group the transactions by timestamp and delivery_hour.
+        - We calculate the volume weighted average price for each group.
+        - We return a DataFrame with the following columns:
+            - timestamp: The UTC timestamp when the transaction occurred.
+            - delivery_hour: The UTC timestamp of the delivery hour for the traded product.
+            - vwap: The volume weighted average price of the transaction.
+            - total_volume: The total volume of the transaction.
+            - num_transactions: The number of transactions in the group.
+        """
+
+        vwap_results = []
+
+        # Group by timestamp and delivery_hour
+        grouped = transactions.groupby(['timestamp', 'delivery_hour'])
+
+        for (timestamp, delivery_hour), group in grouped:
+            if len(group) == 1:
+                # Single transaction - use price and volume directly
+                row = group.iloc[0]
+                vwap = row['price']
+                total_volume = row['volume']
+            else:
+                # Multiple transactions - calculate volume weighted average price
+                total_volume = group['volume'].sum()
+                weighted_price_sum = (group['price'] * group['volume']).sum()
+                vwap = weighted_price_sum / total_volume if total_volume > 0 else 0
+            
+            vwap_results.append({
+                'timestamp': timestamp,
+                'delivery_hour': delivery_hour,
+                'vwap': vwap,
+                'total_volume': total_volume,
+                'num_transactions': len(group)
+            })
+
+        if vwap_results:
+            vwap_df = pd.DataFrame(vwap_results)
+        else:
+            vwap_df = pd.DataFrame()
+        
+        return vwap_df
         
     def run_one_day(self, is_last: bool):
         """
@@ -342,6 +439,30 @@ class Simulation:
             # "balancing_orders": pd.DataFrame(balancing_orders, index=None), # removed for later versions of the code
         }
         return logs
+
+    def get_transactions(self):
+        """
+        Retrieves all transactions that have occurred since the last call and clears the internal transaction log.
+
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame containing all transactions that occurred, with the following columns:
+            - timestamp: The UTC timestamp when the transaction occurred.
+            - delivery_hour: The UTC timestamp of the delivery hour for the traded product.
+            - price: The execution price of the transaction (EUR/MWh).
+            - volume: The volume of the transaction (MW).
+            - buy_order_type: The type of the buy order ('Market' or 'Limit').
+            - sell_order_type: The type of the sell order ('Market' or 'Limit').
+            - buy_order_id: The ID of the buy order.
+            - sell_order_id: The ID of the sell order.
+        """
+        transactions = self._sim_cpp.getTransactions()
+        transactions = pd.DataFrame(transactions)
+        if not transactions.empty:
+            transactions["timestamp"] = pd.to_datetime(transactions["timestamp"], utc=True)
+            transactions["delivery_hour"] = pd.to_datetime(transactions["delivery_hour"], utc=True)
+        return transactions
     
     def print_parameters(self):
         """
@@ -351,15 +472,25 @@ class Simulation:
         startDay = self._sim_cpp.params.startDay
         startYear = self._sim_cpp.params.startYear
         startHour = self._sim_cpp.params.startHour
+        startMinute = self._sim_cpp.params.startMinute
         endMonth = self._sim_cpp.params.endMonth
         endDay = self._sim_cpp.params.endDay
         endYear = self._sim_cpp.params.endYear
         endHour = self._sim_cpp.params.endHour
+        endMinute = self._sim_cpp.params.endMinute
+        tradingStartMonth = self._sim_cpp.params.tradingStartMonth
+        tradingStartDay = self._sim_cpp.params.tradingStartDay
+        tradingStartYear = self._sim_cpp.params.tradingStartYear
+        tradingStartHour = self._sim_cpp.params.tradingStartHour
+        tradingStartMinute = self._sim_cpp.params.tradingStartMinute
 
-        startDate = pd.Timestamp(year=startYear, month=startMonth, day=startDay, hour=startHour, tz="UTC")
-        endDate = pd.Timestamp(year=endYear, month=endMonth, day=endDay, hour=endHour, tz="UTC")
+        startDate = pd.Timestamp(year=startYear, month=startMonth, day=startDay, hour=startHour, minute=startMinute, tz="UTC")
+        endDate = pd.Timestamp(year=endYear, month=endMonth, day=endDay, hour=endHour, minute=endMinute, tz="UTC")
+        tradingStartDate = pd.Timestamp(year=tradingStartYear, month=tradingStartMonth, day=tradingStartDay, hour=tradingStartHour, minute=tradingStartMinute, tz="UTC")
+
         print("Start Time (UTC):", startDate)
         print("End Time (UTC):", endDate)
+        print("Trading Start Time (UTC):", tradingStartDate)
 
         print("Storage Maximum:", self._sim_cpp.params.storageMax, "MWh")
         print("Linear Degredation Cost:", self._sim_cpp.params.linDegCost, "€/MWh")
@@ -368,10 +499,12 @@ class Simulation:
         print("Trading Fee:", self._sim_cpp.params.tradingFee, "€/MWh")
         print("Number of DP Storage States:", self._sim_cpp.params.numStorStates)
         print("Technical Delay:", self._sim_cpp.params.pingDelay, "ms")
+        print("Trading Delay:", self._sim_cpp.params.minuteDelay, "min")
         print("Fixed Solve Time:", self._sim_cpp.params.fixedSolveTime, "ms")
         print("Solve Frequency:", self._sim_cpp.params.dpFreq, "min")
         print("Injection Maximum:", self._sim_cpp.params.injectMax, "MW")
         print("Withdrawal Maximum:", self._sim_cpp.params.withdrawMax, "MW")
+        print("Log Transactions:", self._sim_cpp.params.logTransactions)
         # print("Forecast Horizon Start:", self._sim_cpp.params.foreHorizonStart, "min")
         # print("Forecast Horizon End:", self._sim_cpp.params.foreHorizonEnd, "min")
     

@@ -25,7 +25,7 @@ class Results:
         self.logs = logs
 
     def get_total_reward(self):
-        return np.round(self.logs["decision_record"]['real_reward'].sum(),2)
+        return np.round(self.logs["decision_record"]['full_reward'].sum(),2)
     
     def plot_decision_chart(self,lleft: int = 0,lright: int = -1):
         """
@@ -45,7 +45,7 @@ class Results:
         ax1.plot(df["hour"][lleft:lright], df['position'][lleft:lright], 'o', color='red')
 
 
-        ax2.plot(df["hour"][lleft:lright], df['real_reward'][lleft:lright], color='green')
+        ax2.plot(df["hour"][lleft:lright], df['full_reward'][lleft:lright], color='green')
         ax1.set_xlabel('Time ')
         ax1.set_ylabel('Storage (MWh)')
         ax2.set_ylabel('Reward (€)')
@@ -66,7 +66,7 @@ class Results:
 
         fig1, ax1 = plt.subplots(figsize=(18, 10))
         #plot cumulative reward
-        ax1.plot(df["hour"][lleft:lright], df['real_reward'].cumsum()[lleft:lright], color='blue')
+        ax1.plot(df["hour"][lleft:lright], df['full_reward'].cumsum()[lleft:lright], color='blue')
         ax1.set_xlabel('Time ')
         ax1.set_ylabel('Cumulative Reward (€)')
         ax1.grid(True, alpha=0.5)

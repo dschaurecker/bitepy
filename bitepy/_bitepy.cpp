@@ -58,6 +58,12 @@ PYBIND11_MODULE(_bitepy, m) {
         .def_property("endYear",
                         &simParams::getEndYearPy,
                         &simParams::setEndYearPy)
+        .def_property("startMinute",
+                        &simParams::getStartMinutePy,
+                        &simParams::setStartMinutePy)
+        .def_property("endMinute",
+                        &simParams::getEndMinutePy,
+                        &simParams::setEndMinutePy)
         .def_property("dpFreq",
                         &simParams::getDpFreqPy,
                         &simParams::setDpFreqPy)
@@ -102,7 +108,7 @@ PYBIND11_MODULE(_bitepy, m) {
                         &simParams::setPingDelayPy)
         .def_property("fixedSolveTime",
                         &simParams::getFixedSolveTimePy,
-                        &simParams::setFixedSolveTimePy);
+                        &simParams::setFixedSolveTimePy)
         // .def_property("checkProfit",
         //                 &simParams::getCheckProfitPy,
         //                 &simParams::setCheckProfitPy)
@@ -121,6 +127,27 @@ PYBIND11_MODULE(_bitepy, m) {
         // .def_property("bidAskPenalty",
         //                 &simParams::getBidAskPenaltyPy,
         //                 &simParams::setBidAskPenaltyPy)
+        .def_property("minuteDelay",
+                    &SimulationParameters::getMinuteDelayPy,
+                    &SimulationParameters::setMinuteDelayPy)
+        .def_property("logTransactions",
+                    &SimulationParameters::getLogTransactionsPy,
+                    &SimulationParameters::setLogTransactionsPy)
+        .def_property("tradingStartMonth",
+                    &SimulationParameters::getTradingStartMonthPy,
+                    &SimulationParameters::setTradingStartMonthPy)
+        .def_property("tradingStartDay",
+                    &SimulationParameters::getTradingStartDayPy,
+                    &SimulationParameters::setTradingStartDayPy)
+        .def_property("tradingStartYear",
+                    &SimulationParameters::getTradingStartYearPy,
+                    &SimulationParameters::setTradingStartYearPy)
+        .def_property("tradingStartHour",
+                    &SimulationParameters::getTradingStartHourPy,
+                    &SimulationParameters::setTradingStartHourPy)
+        .def_property("tradingStartMinute",
+                    &SimulationParameters::getTradingStartMinutePy,
+                    &SimulationParameters::setTradingStartMinutePy);
         
         // Method to print parameters
         // .def("printParameters", &simParams::printParameters);
@@ -171,8 +198,8 @@ PYBIND11_MODULE(_bitepy, m) {
                 pyRecord["storage"] = record.storage;
                 pyRecord["position"] = record.position;
                 // pyRecord["final_reward"] = record.finalReward;
-                pyRecord["real_reward"] = record.realReward;
-                pyRecord["real_reward_no_deg"] = record.realRewardNoDeg;
+                pyRecord["full_reward"] = record.fullReward;
+                pyRecord["id_reward_no_deg"] = record.idRewardNoDeg;
                 // Append the record to the results list
                 decisionRec.append(pyRecord);
             }
@@ -243,9 +270,10 @@ PYBIND11_MODULE(_bitepy, m) {
                 pyRecord["time"] = ForeLogOrder::epochToDateTimeMS(record.time);
                 pyRecord["last_solve_time"] = ForeLogOrder::epochToDateTimeMS(record.lastSolveTime);
                 pyRecord["hour"] = ForeLogOrder::epochToDateTime(record.hour);
-                pyRecord["reward"] = record.reward / 1000.0;
+                pyRecord["cancel"] = ForeLogOrder::epochToDateTimeMS(record.cancel);
+                pyRecord["type"] = record.type == LimitOrder::Type::Buy ? "Buy" : "Sell";
+                pyRecord["price"] = record.price / 100.0;
                 pyRecord["volume"] = record.volume / 10.0;
-                pyRecord["volume_previous"] = record.volumePrevious / 10.0;
                 foreOrderList.append(pyRecord);
             }
 
@@ -283,6 +311,24 @@ PYBIND11_MODULE(_bitepy, m) {
             }
             // Return the results to Python
             return py::make_tuple(decisionRec, priceRec, accOrderList, execOrderList, foreOrderList, removedOrdersList, balOrderList);
+        })
+
+        .def("getTransactions", [](Simulation &self) {
+            // Get transaction records and return them to Python
+            py::list transactionList;
+            for (const auto &record : self.getAndClearTransactions()) {
+                py::dict pyRecord;
+                pyRecord["timestamp"] = record.formatTimestamp();
+                pyRecord["delivery_hour"] = record.formatDeliveryHour();
+                pyRecord["price"] = record.price;
+                pyRecord["volume"] = record.volume / 10.0; // Convert from internal units to MW
+                pyRecord["buy_order_type"] = record.buy_order_type;
+                pyRecord["sell_order_type"] = record.sell_order_type;
+                pyRecord["buy_order_id"] = record.buy_order_id;
+                pyRecord["sell_order_id"] = record.sell_order_id;
+                transactionList.append(pyRecord);
+            }
+            return transactionList;
         })
 
         .def("return_vol_price_pairs", [](sim &self, const bool last, const int frequency, const std::vector<int>& volumes) {
