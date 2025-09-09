@@ -90,7 +90,7 @@ archs = ["auto"] # Or specific like ["x86_64", "aarch64"]
 
 # Environment variables can also be set here instead of the workflow file
 [tool.cibuildwheel.environment]
-CMAKE_CXX_STANDARD = "17"
+CMAKE_CXX_STANDARD = "20"
 CMAKE_CXX_STANDARD_REQUIRED = "ON"
-CMAKE_CXX_FLAGS = "-std=c++17"
+CMAKE_CXX_FLAGS = "-std=c++20"
 BUILD_VERBOSE = "1"

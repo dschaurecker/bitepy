@@ -40,7 +40,7 @@ endif()
 find_package(pybind11 REQUIRED)
 
 # --- Set your desired C++ standard and compile options ---
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -63,6 +63,7 @@ pybind11_add_module(_bitepy
     bitepy/cpp_source_submodule/bite/src/Util.cpp
     bitepy/cpp_source_submodule/bite/src/MILPStats.cpp
     bitepy/cpp_source_submodule/bite/src/BalancingOrder.cpp
+    bitepy/cpp_source_submodule/bite/src/tz.cpp
 )
 
 set_target_properties(_bitepy
