@@ -4,6 +4,17 @@ project(bitepy LANGUAGES CXX)
 # Find Python 3 interpreter and development components
 find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 
+# Find CURL (required for timezone database downloads)
+# Make CURL optional to allow builds without remote timezone download capability
+find_package(CURL QUIET)
+if(CURL_FOUND)
+    message(STATUS "Found CURL: ${CURL_LIBRARIES}")
+    set(HAS_CURL TRUE)
+else()
+    message(WARNING "CURL not found. Building without remote timezone database download capability.")
+    set(HAS_CURL FALSE)
+endif()
+
 message(STATUS "Found Python3 Interpreter: ${Python3_EXECUTABLE}")
 # Note: These might be empty if CMake uses imported targets primarily
 message(STATUS "Found Python3 Libraries: ${Python3_LIBRARIES}")
@@ -68,7 +79,7 @@ pybind11_add_module(_bitepy
 
 set_target_properties(_bitepy
     PROPERTIES
-        CXX_STANDARD 17
+        CXX_STANDARD 20
         CXX_STANDARD_REQUIRED YES
         CXX_EXTENSIONS NO
 )
@@ -117,6 +128,14 @@ target_include_directories(_bitepy PRIVATE
 
 #target_link_libraries(_bitepy PRIVATE "${GUROBI_LIB}")
 
+# Set up compiler definitions and link libraries based on available dependencies
+if(HAS_CURL)
+    target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=1)
+    target_link_libraries(_bitepy PRIVATE CURL::libcurl)
+else()
+    target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=0)
+endif()
+
 target_link_libraries(_bitepy
     PRIVATE
         pybind11::module  # pybind11
@@ -130,7 +149,7 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         -O3          # Optimization level
         -funroll-loops # Loop unrolling optimization
         -flto        # Link-time optimization (compile part)
-        -std=c++17   # Set C++ standard
+        -std=c++20   # Set C++ standard
     )
     target_link_options(_bitepy PRIVATE
         -flto        # Link-time optimization (link part)

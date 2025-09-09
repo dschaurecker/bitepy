@@ -9,7 +9,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "bitepy"
-version = "0.5.4"
+version = "0.6.0"
 authors = [
   { name="David Schaurecker", email="dschaurecker@gmail.com" },
 ]
@@ -94,3 +94,22 @@ CMAKE_CXX_STANDARD = "20"
 CMAKE_CXX_STANDARD_REQUIRED = "ON"
 CMAKE_CXX_FLAGS = "-std=c++20"
 BUILD_VERBOSE = "1"
+
+# Platform-specific configurations for installing dependencies
+[tool.cibuildwheel.linux]
+before-all = [
+    # Install cURL development libraries for manylinux containers
+    "yum install -y libcurl-devel || (apt-get update && apt-get install -y libcurl4-openssl-dev) || apk add --no-cache curl-dev",
+]
+
+[tool.cibuildwheel.macos]
+before-all = [
+    # cURL is usually already available on macOS, but ensure dev headers are present
+    "echo 'cURL should be available on macOS by default'",
+]
+
+[tool.cibuildwheel.windows]
+before-all = [
+    # Windows: Use vcpkg to install curl
+    "vcpkg install curl",
+]
