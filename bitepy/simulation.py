@@ -320,21 +320,23 @@ class Simulation:
 
     def group_transactions(self, transactions: pd.DataFrame):
         """
-        Parameters
-        ----------
-        transactions : pd.DataFrame
-            A DataFrame containing the transactions to be grouped.
+        Group transactions by timestamp and delivery hour, calculating volume-weighted average prices.
 
-        Processing Steps
-        ----------------
-        - We group the transactions by timestamp and delivery_hour.
-        - We calculate the volume weighted average price for each group.
-        - We return a DataFrame with the following columns:
-            - timestamp: The UTC timestamp when the transaction occurred.
-            - delivery_hour: The UTC timestamp of the delivery hour for the traded product.
-            - vwap: The volume weighted average price of the transaction.
-            - total_volume: The total volume of the transaction.
-            - num_transactions: The number of transactions in the group.
+        Args:
+            transactions (pd.DataFrame): A DataFrame containing the transactions to be grouped.
+
+        Processing Steps:
+            - Group the transactions by timestamp and delivery_hour.
+            - Calculate the volume weighted average price for each group.
+            - Return a DataFrame with aggregated transaction data.
+
+        Returns:
+            pd.DataFrame: A DataFrame with the following columns:
+                - timestamp: The UTC timestamp when the transaction occurred.
+                - delivery_hour: The UTC timestamp of the delivery hour for the traded product.
+                - vwap: The volume weighted average price of the transaction.
+                - total_volume: The total volume of the transaction.
+                - num_transactions: The number of transactions in the group.
         """
 
         vwap_results = []
@@ -442,20 +444,18 @@ class Simulation:
 
     def get_transactions(self):
         """
-        Retrieves all transactions that have occurred since the last call and clears the internal transaction log.
+        Retrieve all transactions that have occurred since the last call and clear the internal transaction log.
 
-        Returns
-        -------
-        pd.DataFrame
-            A DataFrame containing all transactions that occurred, with the following columns:
-            - timestamp: The UTC timestamp when the transaction occurred.
-            - delivery_hour: The UTC timestamp of the delivery hour for the traded product.
-            - price: The execution price of the transaction (EUR/MWh).
-            - volume: The volume of the transaction (MW).
-            - buy_order_type: The type of the buy order ('Market' or 'Limit').
-            - sell_order_type: The type of the sell order ('Market' or 'Limit').
-            - buy_order_id: The ID of the buy order.
-            - sell_order_id: The ID of the sell order.
+        Returns:
+            pd.DataFrame: A DataFrame containing all transactions that occurred, with the following columns:
+                - timestamp: The UTC timestamp when the transaction occurred.
+                - delivery_hour: The UTC timestamp of the delivery hour for the traded product.
+                - price: The execution price of the transaction (EUR/MWh).
+                - volume: The volume of the transaction (MW).
+                - buy_order_type: The type of the buy order ('Market' or 'Limit').
+                - sell_order_type: The type of the sell order ('Market' or 'Limit').
+                - buy_order_id: The ID of the buy order.
+                - sell_order_id: The ID of the sell order.
         """
         transactions = self._sim_cpp.getTransactions()
         transactions = pd.DataFrame(transactions)
@@ -467,6 +467,11 @@ class Simulation:
     def print_parameters(self):
         """
         Print the simulation parameters, including start/end times, storage settings, and various limits and costs.
+
+        Processing Steps:
+            - Extract simulation start, end, and trading start times from internal parameters.
+            - Display all relevant storage configuration parameters.
+            - Show trading and technical constraints.
         """
         startMonth = self._sim_cpp.params.startMonth
         startDay = self._sim_cpp.params.startDay
@@ -516,6 +521,11 @@ class Simulation:
             is_last (bool): If True, indicates this is the last iteration of data.
             frequency (int): The frequency (in seconds) at which price data is retrieved.
             volumes (np.ndarray): A 1D numpy array of volumes for which prices are returned.
+
+        Processing Steps:
+            - Validate input parameters for correct format and values.
+            - Extract volume-price data from the simulation at specified frequency.
+            - Convert timestamps to UTC format for consistency.
 
         Returns:
             pd.DataFrame: A DataFrame with columns:
