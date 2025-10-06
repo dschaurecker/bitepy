@@ -74,6 +74,7 @@ pybind11_add_module(_bitepy
     bitepy/cpp_source_submodule/bite/src/Util.cpp
     bitepy/cpp_source_submodule/bite/src/MILPStats.cpp
     bitepy/cpp_source_submodule/bite/src/BalancingOrder.cpp
+    bitepy/cpp_source_submodule/bite/src/OrderQueue.cpp
     bitepy/cpp_source_submodule/bite/src/tz.cpp
 )
 
