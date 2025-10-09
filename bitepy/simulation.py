@@ -252,8 +252,7 @@ class Simulation:
         # round up to midnight
         end_date_berlin_round_up = end_date_berlin.replace(hour=23, minute=59, second=59)
         
-        if base_path[-1] != '/':
-            base_path += '/'
+        base_path = os.path.join(base_path, '')
         base_path += "orderbook_"
 
         # Generate paths for each day within the date range
