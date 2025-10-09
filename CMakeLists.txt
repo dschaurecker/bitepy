@@ -137,6 +137,9 @@ else()
     target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=0)
 endif()
 
+# Use OS timezone database instead of downloading/hardcoding paths
+target_compile_definitions(_bitepy PRIVATE USE_OS_TZDB=1)
+
 target_link_libraries(_bitepy
     PRIVATE
         pybind11::module  # pybind11
