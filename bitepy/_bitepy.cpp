@@ -147,7 +147,10 @@ PYBIND11_MODULE(_bitepy, m) {
                     &SimulationParameters::setTradingStartHourPy)
         .def_property("tradingStartMinute",
                     &SimulationParameters::getTradingStartMinutePy,
-                    &SimulationParameters::setTradingStartMinutePy);
+                    &SimulationParameters::setTradingStartMinutePy)
+        .def_property("cycleLimit",
+                    &SimulationParameters::getCycleLimitPy,
+                    &SimulationParameters::setCycleLimitPy);
         
         // Method to print parameters
         // .def("printParameters", &simParams::printParameters);
@@ -226,7 +229,7 @@ PYBIND11_MODULE(_bitepy, m) {
             for (const auto &record : decRecord) {
                 // Create a Python dictionary to store the record
                 py::dict pyRecord;
-                pyRecord["hour"] = record.hour;
+                pyRecord["hour"] = Simulation::formatDateTime(record.hour);
                 pyRecord["storage"] = record.storage;
                 pyRecord["position"] = record.position;
                 // pyRecord["final_reward"] = record.finalReward;
@@ -241,7 +244,7 @@ PYBIND11_MODULE(_bitepy, m) {
             for (const auto &record : priceRecord) {
                 // Create a Python dictionary to store the record
                 py::dict pyRecord;
-                pyRecord["hour"] = record.hour;
+                pyRecord["hour"] = Simulation::formatDateTime(record.hour);
                 pyRecord["low"] = record.low;
                 pyRecord["high"] = record.high;
                 pyRecord["last"] = record.last;

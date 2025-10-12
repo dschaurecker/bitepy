@@ -36,7 +36,8 @@ class Simulation:
                  solve_frequency=0.,
                  withdraw_max=5.,
                  inject_max=5.,
-                 log_transactions=False,):
+                 log_transactions=False,
+                 cycle_limit: float = None,):
                 #  forecast_horizon_start=10*60,
                 #  forecast_horizon_end=75):
         """
@@ -59,6 +60,7 @@ class Simulation:
             withdraw_max (float, optional): The maximum withdrawal power of the storage unit (MW). Default is 5.0.
             inject_max (float, optional): The maximum injection power of the storage unit (MW). Default is 5.0.
             log_transactions (bool, optional): If True, we run the simulation only to log transactions data of the market, no optimization is performed. Default is False.
+            cycle_limit: The limit on the number of cycles per Berlin-time day. Setting it comes at a cost in terms of solve time. (float, > 0). Default is None, where no cycle limit is enforced.
         """
         # forecast_horizon_start (int, optional): The start of the forecast horizon (min). Default is 600.
         # forecast_horizon_end (int, optional): The end of the forecast horizon (min). Default is 75.
@@ -95,6 +97,9 @@ class Simulation:
             raise ValueError("inject_max must be > 0")
         if trading_delay < 0 or trading_delay >= 8*60:
             raise ValueError("trading_delay must be >= 0 and < 480 mins (8 hours)")
+        if cycle_limit is not None:
+            if cycle_limit <= 0:
+                raise ValueError("cycle_limit must be > 0 if provided")
         # if forecast_horizon_start < 0:
         #     raise ValueError("forecast_horizon_start must be >= 0")
         # if forecast_horizon_end < 0:
@@ -117,6 +122,8 @@ class Simulation:
         self._sim_cpp.params.injectMax = inject_max
         self._sim_cpp.params.minuteDelay = trading_delay
         self._sim_cpp.params.logTransactions = log_transactions
+        if cycle_limit is not None:
+            self._sim_cpp.params.cycleLimit = float(cycle_limit)
         # self._sim_cpp.params.foreHorizonStart = forecast_horizon_start
         # self._sim_cpp.params.foreHorizonEnd = forecast_horizon_end
 
@@ -487,6 +494,7 @@ class Simulation:
         tradingStartYear = self._sim_cpp.params.tradingStartYear
         tradingStartHour = self._sim_cpp.params.tradingStartHour
         tradingStartMinute = self._sim_cpp.params.tradingStartMinute
+        cycleLimit = self._sim_cpp.params.cycleLimit
 
         startDate = pd.Timestamp(year=startYear, month=startMonth, day=startDay, hour=startHour, minute=startMinute, tz="UTC")
         endDate = pd.Timestamp(year=endYear, month=endMonth, day=endDay, hour=endHour, minute=endMinute, tz="UTC")
@@ -509,6 +517,7 @@ class Simulation:
         print("Injection Maximum:", self._sim_cpp.params.injectMax, "MW")
         print("Withdrawal Maximum:", self._sim_cpp.params.withdrawMax, "MW")
         print("Log Transactions:", self._sim_cpp.params.logTransactions)
+        print("Cycle Limit:", cycleLimit)
         # print("Forecast Horizon Start:", self._sim_cpp.params.foreHorizonStart, "min")
         # print("Forecast Horizon End:", self._sim_cpp.params.foreHorizonEnd, "min")
     
