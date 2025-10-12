@@ -112,6 +112,8 @@ jobs:
     permissions:
       id-token: write # Allow workflow to get OIDC ID token for PyPI
       contents: read # Allow checkout if needed (though not strictly required by pypi-publish)
+    # Condition: Only run on pre-release tags (containing a hyphen, e.g., v1.0.0-rc1) or manual workflow dispatch
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-'))
 
     steps:
       - name: Download all wheel artifacts
