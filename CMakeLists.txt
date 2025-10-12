@@ -130,11 +130,17 @@ target_include_directories(_bitepy PRIVATE
 #target_link_libraries(_bitepy PRIVATE "${GUROBI_LIB}")
 
 # Set up compiler definitions and link libraries based on available dependencies
-# Use OS timezone database instead of downloading/hardcoding paths
-target_compile_definitions(_bitepy PRIVATE USE_OS_TZDB=1)
-
-# When using OS timezone database, HAS_REMOTE_API must be 0 (they cannot be used together)
-target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=0)
+# Use OS timezone database on Unix-like systems (Linux, macOS), but not on Windows
+if(WIN32)
+    # On Windows, use embedded timezone database (USE_OS_TZDB=0 is default)
+    # and disable remote API
+    target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=0)
+else()
+    # On Unix-like systems, use OS timezone database
+    target_compile_definitions(_bitepy PRIVATE USE_OS_TZDB=1)
+    # When using OS timezone database, HAS_REMOTE_API must be 0 (they cannot be used together)
+    target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=0)
+endif()
 
 target_link_libraries(_bitepy
     PRIVATE
