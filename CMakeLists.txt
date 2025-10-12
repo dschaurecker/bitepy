@@ -130,15 +130,11 @@ target_include_directories(_bitepy PRIVATE
 #target_link_libraries(_bitepy PRIVATE "${GUROBI_LIB}")
 
 # Set up compiler definitions and link libraries based on available dependencies
-if(HAS_CURL)
-    target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=1)
-    target_link_libraries(_bitepy PRIVATE CURL::libcurl)
-else()
-    target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=0)
-endif()
-
 # Use OS timezone database instead of downloading/hardcoding paths
 target_compile_definitions(_bitepy PRIVATE USE_OS_TZDB=1)
+
+# When using OS timezone database, HAS_REMOTE_API must be 0 (they cannot be used together)
+target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=0)
 
 target_link_libraries(_bitepy
     PRIVATE
