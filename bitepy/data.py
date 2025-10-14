@@ -234,7 +234,7 @@ class Data:
     
     
     def _read_nordpool_table(self, date, marketdatapath):
-
+        """Read and process NordPool parquet files for a specific date."""
         year = str(date.year)
         month = f"{date.month:02d}"
         day = f"{date.day:02d}"
@@ -248,15 +248,15 @@ class Data:
         if not parquet_files:
             raise FileNotFoundError(f"No parquet files found in folder: {folder_path}")
         
+        # Read and concatenate all hourly parquet files
         dfs = []
-        tot_rows = 0
         for file in parquet_files:
             df_temp = pd.read_parquet(file)
-            tot_rows += len(df_temp)
             dfs.append(df_temp)
         
         df = pd.concat(dfs, ignore_index=True)
-
+        
+        # Convert timestamps (needed for subsequent filtering and processing)
         df = (df
             .assign(createdTime=lambda x: pd.to_datetime(x['createdTime'], format='ISO8601'))
             .assign(expirationTime=lambda x: pd.to_datetime(x['expirationTime'], format='ISO8601'))
@@ -264,18 +264,18 @@ class Data:
             .assign(deliveryEnd=lambda x: pd.to_datetime(x['deliveryEnd'], format='ISO8601'))
             )
         
+        # Filter and prepare data
         df = (df
             .drop_duplicates(subset=['orderId', 'originalOrderId', 'action', 'expirationTime', 'price', 'volume'])
             .loc[lambda x: x['contractName'].str.startswith('PH')]
-            .assign(delivery_duration=lambda x: x['deliveryEnd'] - x['deliveryStart'])
-            .loc[lambda x: x['delivery_duration'] == pd.Timedelta(hours=1)]
-            .drop('delivery_duration', axis=1)
-            .loc[lambda x: x['action'].isin(['UserAdded', 'UserModified', 'UserDeleted', 'SystemDeleted'])]
+            .loc[lambda x: x['action'].isin(['UserAdded', 'UserModified', 'UserDeleted', 'SystemDeleted', 'UserHibernated'])]
             )
         
+        # Remove iceberg orders
         iceberg_IDs = df.loc[df['orderType'] == 'Iceberg', 'originalOrderId'].unique()
         df = df.loc[~df['originalOrderId'].isin(iceberg_IDs)]
         
+        # Rename columns to standardized format
         df = df.rename(columns={
             'orderId': 'order',
             'originalOrderId': 'initial',
@@ -286,13 +286,16 @@ class Data:
             'action': 'action_original'
         })
         
+        # Map NordPool actions to standardized codes
         df['action'] = df['action_original'].map({
             'UserAdded': 'A',
             'UserModified': 'C',
             'UserDeleted': 'D',
-            'SystemDeleted': 'D'
+            'SystemDeleted': 'D',
+            'UserHibernated': 'H'
         })
         
+        # Process change messages (modifications)
         change_messages = df[df["action"] == "C"].drop_duplicates(subset=["order"], keep="first")
         not_added = change_messages[~(change_messages["order"].isin(df.loc[df["action"] == "A", "order"]))]
         change_messages = change_messages[~(change_messages["order"].isin(not_added["order"]))]
@@ -312,6 +315,7 @@ class Data:
             change_messages = change_messages[~(change_messages["order"].isin(not_added["order"]))]
             change_exists = change_messages.shape[0] > 0
         
+        # Process cancel messages (deletions)
         cancel_messages = df[df["action"] == "D"]
         not_added = cancel_messages[~(cancel_messages["order"].isin(df.loc[df["action"] == "A", "order"]))]
         cancel_messages = cancel_messages[~(cancel_messages["order"].isin(not_added["order"]))]
@@ -323,47 +327,58 @@ class Data:
         df.loc[merged["df_index_copy"].to_numpy(), "validity"] = merged["transaction_x"].to_numpy()
         
         df = df.loc[lambda x: ~(x["action"] == "D")]
-        df = df.drop(["order", "action", "action_original", "df_index_copy"], axis=1, errors='ignore')
         
-        df = df[df['quantity'] > 0]
+        # Process hibernation messages
+        hibernated_messages = df[df["action"] == "H"]
+        not_added = hibernated_messages[~(hibernated_messages["order"].isin(df.loc[df["action"] == "A", "order"]))]
+        hibernated_messages = hibernated_messages[~(hibernated_messages["order"].isin(not_added["order"]))]
         
+        if not hibernated_messages.empty:
+            indexer_messA_with_hibernated = df[(df["order"].isin(hibernated_messages["order"])) & (df["action"] == "A")] \
+                .sort_values("transaction").groupby("order").tail(1).index
+            df["df_index_copy"] = df.index
+            merged = pd.merge(hibernated_messages, df.loc[indexer_messA_with_hibernated], on='order')
+            df.loc[merged["df_index_copy"].to_numpy(), "validity"] = merged["transaction_x"].to_numpy()
+            df.drop("df_index_copy", axis=1, inplace=True)
+        
+        df = df.loc[lambda x: ~(x["action"] == "H")]
+        df = df.drop(["order", "action", "action_original"], axis=1, errors='ignore')
+        
+        # Convert timestamps to string format
         df["start"] = df["start"].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
         df["transaction"] = df["transaction"].dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
         df["validity"] = df["validity"].dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
         
+        # Select and order final columns
         df = df[['initial', 'side', 'start', 'transaction', 'validity', 'price', 'quantity']]
-
+        
         return df
 
+
     def parse_market_data(self, start_date_str: str, end_date_str: str, marketdatapath: str, 
-                     savepath: str, market_type: str, verbose: bool = True):
+                        savepath: str, market_type: str, verbose: bool = True):
         """
         Parse market data between two dates and save processed zipped CSV files.
-
-        This method sequentially loads and processes the raw market data files (zipped order book data)
-        provided by EPEX. It converts the raw data into a sorted CSV file for each day in UTC time format.
-
-        The processing constructs the file name based on the timestamp,
-        reads the zipped CSV file (using a different CSV format and separator compared to 2020),
-        processes the data by removing duplicates, filtering rows, renaming columns,
-        and converting timestamp columns to UTC ISO 8601 format.
-        Additional processing is done to handle change and cancel messages.
-
+        
+        Processes raw order book data from EPEX or NordPool markets and converts them into 
+        standardized sorted CSV files for each day in UTC time format. Handles order lifecycle 
+        events (additions, modifications, cancellations) and reconstructs order validity periods.
+        
         Args:
-            start_date_str (str): Start date string in the format "YYYY-MM-DD" (no time zone).
-            end_date_str (str): End date string in the format "YYYY-MM-DD" (no time zone).
-            marketdatapath (str): Path to the market data folder containing yearly/monthly subfolders with zipped files.
-            savepath (str): Directory path where the parsed CSV files should be saved.
-            market_type: "EPEX" or "NordPool"
-            verbose (bool, optional): If True, print progress messages. Defaults to True.
+            start_date_str (str): Start date in format "YYYY-MM-DD"
+            end_date_str (str): End date in format "YYYY-MM-DD"
+            marketdatapath (str): Path to market data folder with yearly/monthly subfolders
+            savepath (str): Directory where processed CSV files will be saved
+            market_type (str): "EPEX" or "NordPool"
+            verbose (bool, optional): Print progress messages. Defaults to True.
         """
         
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-  
+        
         start_date = pd.Timestamp(start_date_str)
         end_date = pd.Timestamp(end_date_str)
-
+        
         if start_date > end_date:
             raise ValueError("Error: Start date is after end date.")
         if market_type == "EPEX" and start_date.year < 2020:
@@ -379,6 +394,8 @@ class Data:
                 df1 = df2
                 df2 = pd.DataFrame()
                 dt2 = dt1 + pd.Timedelta(days=1)
+                
+                # Read current day data
                 if df1.empty:
                     if market_type == "EPEX":
                         if dt1.year == 2020:
@@ -392,6 +409,7 @@ class Data:
                     else:
                         raise ValueError(f"Unknown market_type: {market_type}")
                 
+                # Read next day data (captures orders with transaction today, delivery tomorrow)
                 if dt2 <= end_date:
                     if market_type == "EPEX":
                         if dt2.year == 2020:
@@ -405,10 +423,12 @@ class Data:
                     else:
                         raise ValueError(f"Unknown market_type: {market_type}")
                 
+                # Combine and filter by transaction date
                 df = pd.concat([df1, df2])
                 df = df.sort_values(by='transaction')
                 df['transaction_date'] = pd.to_datetime(df['transaction']).dt.date
                 grouped = df.groupby('transaction_date')
+                
                 save_date = dt1.date()
                 group = grouped.get_group(save_date)
                 daily_filename = f"{savepath}orderbook_{save_date}.csv"
