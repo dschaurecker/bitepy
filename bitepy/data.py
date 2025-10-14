@@ -13,6 +13,8 @@ import numpy as np
 from zipfile import ZipFile
 import os
 from tqdm import tqdm
+from pathlib import Path
+from datetime import datetime
 
 try:
     from ._bitepy import Simulation_cpp
@@ -229,10 +231,114 @@ class Data:
         df["validity"] = df["validity"].dt.tz_localize('UTC').dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
         
         return df
+    
+    
+    def _read_nordpool_table(self, date, marketdatapath):
 
-    def parse_market_data(self, start_date_str: str, end_date_str: str, marketdatapath: str, savepath: str, verbose: bool = True):
+        year = str(date.year)
+        month = f"{date.month:02d}"
+        day = f"{date.day:02d}"
+        folder_path = Path(marketdatapath) / year / month / day
+        
+        if not folder_path.exists():
+            raise FileNotFoundError(f"Folder not found: {folder_path}")
+        
+        parquet_files = sorted(folder_path.glob("NordPool_*.parquet"))
+        
+        if not parquet_files:
+            raise FileNotFoundError(f"No parquet files found in folder: {folder_path}")
+        
+        dfs = []
+        tot_rows = 0
+        for file in parquet_files:
+            df_temp = pd.read_parquet(file)
+            tot_rows += len(df_temp)
+            dfs.append(df_temp)
+        
+        df = pd.concat(dfs, ignore_index=True)
+
+        df = (df
+            .assign(createdTime=lambda x: pd.to_datetime(x['createdTime'], format='ISO8601'))
+            .assign(expirationTime=lambda x: pd.to_datetime(x['expirationTime'], format='ISO8601'))
+            .assign(deliveryStart=lambda x: pd.to_datetime(x['deliveryStart'], format='ISO8601'))
+            .assign(deliveryEnd=lambda x: pd.to_datetime(x['deliveryEnd'], format='ISO8601'))
+            )
+        
+        df = (df
+            .drop_duplicates(subset=['orderId', 'originalOrderId', 'action', 'expirationTime', 'price', 'volume'])
+            .loc[lambda x: x['contractName'].str.startswith('PH')]
+            .assign(delivery_duration=lambda x: x['deliveryEnd'] - x['deliveryStart'])
+            .loc[lambda x: x['delivery_duration'] == pd.Timedelta(hours=1)]
+            .drop('delivery_duration', axis=1)
+            .loc[lambda x: x['action'].isin(['UserAdded', 'UserModified', 'UserDeleted', 'SystemDeleted'])]
+            )
+        
+        iceberg_IDs = df.loc[df['orderType'] == 'Iceberg', 'originalOrderId'].unique()
+        df = df.loc[~df['originalOrderId'].isin(iceberg_IDs)]
+        
+        df = df.rename(columns={
+            'orderId': 'order',
+            'originalOrderId': 'initial',
+            'deliveryStart': 'start',
+            'createdTime': 'transaction',
+            'expirationTime': 'validity',
+            'volume': 'quantity',
+            'action': 'action_original'
+        })
+        
+        df['action'] = df['action_original'].map({
+            'UserAdded': 'A',
+            'UserModified': 'C',
+            'UserDeleted': 'D',
+            'SystemDeleted': 'D'
+        })
+        
+        change_messages = df[df["action"] == "C"].drop_duplicates(subset=["order"], keep="first")
+        not_added = change_messages[~(change_messages["order"].isin(df.loc[df["action"] == "A", "order"]))]
+        change_messages = change_messages[~(change_messages["order"].isin(not_added["order"]))]
+        
+        change_exists = change_messages.shape[0] > 0
+        while change_exists:
+            indexer_messA_with_change = df[(df["order"].isin(change_messages["order"])) & (df["action"] == "A")] \
+                .sort_values("transaction").groupby("order").tail(1).index
+            df["df_index_copy"] = df.index
+            merged = pd.merge(change_messages, df.loc[indexer_messA_with_change], on='order')
+            df.loc[merged["df_index_copy"].to_numpy(), "validity"] = merged["transaction_x"].to_numpy()
+            df.loc[df.index.isin(change_messages.index), "action"] = "A"
+            df.drop("df_index_copy", axis=1, inplace=True)
+            
+            change_messages = df[df["action"] == "C"].drop_duplicates(subset=["order"], keep="first")
+            not_added = change_messages[~(change_messages["order"].isin(df.loc[df["action"] == "A", "order"]))]
+            change_messages = change_messages[~(change_messages["order"].isin(not_added["order"]))]
+            change_exists = change_messages.shape[0] > 0
+        
+        cancel_messages = df[df["action"] == "D"]
+        not_added = cancel_messages[~(cancel_messages["order"].isin(df.loc[df["action"] == "A", "order"]))]
+        cancel_messages = cancel_messages[~(cancel_messages["order"].isin(not_added["order"]))]
+        
+        indexer_messA_with_cancel = df[(df["order"].isin(cancel_messages["order"])) & (df["action"] == "A")] \
+            .sort_values("transaction").groupby("order").tail(1).index
+        df["df_index_copy"] = df.index
+        merged = pd.merge(cancel_messages, df.loc[indexer_messA_with_cancel], on='order')
+        df.loc[merged["df_index_copy"].to_numpy(), "validity"] = merged["transaction_x"].to_numpy()
+        
+        df = df.loc[lambda x: ~(x["action"] == "D")]
+        df = df.drop(["order", "action", "action_original", "df_index_copy"], axis=1, errors='ignore')
+        
+        df = df[df['quantity'] > 0]
+        
+        df["start"] = df["start"].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+        df["transaction"] = df["transaction"].dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
+        df["validity"] = df["validity"].dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
+        
+        df = df[['initial', 'side', 'start', 'transaction', 'validity', 'price', 'quantity']]
+
+        return df
+
+    def parse_market_data(self, start_date_str: str, end_date_str: str, marketdatapath: str, 
+                     savepath: str, market_type: str, verbose: bool = True):
         """
-        Parse EPEX market data between two dates and save processed zipped CSV files.
+        Parse market data between two dates and save processed zipped CSV files.
 
         This method sequentially loads and processes the raw market data files (zipped order book data)
         provided by EPEX. It converts the raw data into a sorted CSV file for each day in UTC time format.
@@ -248,19 +354,21 @@ class Data:
             end_date_str (str): End date string in the format "YYYY-MM-DD" (no time zone).
             marketdatapath (str): Path to the market data folder containing yearly/monthly subfolders with zipped files.
             savepath (str): Directory path where the parsed CSV files should be saved.
+            market_type: "EPEX" or "NordPool"
             verbose (bool, optional): If True, print progress messages. Defaults to True.
         """
+        
         if not os.path.exists(savepath):
             os.makedirs(savepath)
-
+  
         start_date = pd.Timestamp(start_date_str)
         end_date = pd.Timestamp(end_date_str)
-    
+
         if start_date > end_date:
             raise ValueError("Error: Start date is after end date.")
-        if start_date.year < 2020:
+        if market_type == "EPEX" and start_date.year < 2020:
             raise ValueError("Error: Years before 2020 are not supported.")
-
+        
         dates = pd.date_range(start_date, end_date, freq="D")
         df1 = pd.DataFrame()
         df2 = pd.DataFrame()
@@ -272,30 +380,41 @@ class Data:
                 df2 = pd.DataFrame()
                 dt2 = dt1 + pd.Timedelta(days=1)
                 if df1.empty:
-                    if dt1.year == 2020:
-                        df1 = self._read_id_table_2020(dt1, marketdatapath)
-                    elif dt1.year >= 2021:
-                        df1 = self._read_id_table_2021(dt1, marketdatapath)
+                    if market_type == "EPEX":
+                        if dt1.year == 2020:
+                            df1 = self._read_id_table_2020(dt1, marketdatapath)
+                        elif dt1.year >= 2021:
+                            df1 = self._read_id_table_2021(dt1, marketdatapath)
+                        else:
+                            raise ValueError("Error: Year not >= 2020")
+                    elif market_type == "NordPool":
+                        df1 = self._read_nordpool_table(dt1, marketdatapath)
                     else:
-                        raise ValueError("Error: Year not >= 2020")
+                        raise ValueError(f"Unknown market_type: {market_type}")
+                
                 if dt2 <= end_date:
-                    if dt2.year == 2020:
-                        df2 = self._read_id_table_2020(dt2, marketdatapath)
-                    elif dt2.year >= 2021:
-                        df2 = self._read_id_table_2021(dt2, marketdatapath)
+                    if market_type == "EPEX":
+                        if dt2.year == 2020:
+                            df2 = self._read_id_table_2020(dt2, marketdatapath)
+                        elif dt2.year >= 2021:
+                            df2 = self._read_id_table_2021(dt2, marketdatapath)
+                        else:
+                            raise ValueError("Error: Year not >= 2020")
+                    elif market_type == "NordPool":
+                        df2 = self._read_nordpool_table(dt2, marketdatapath)
                     else:
-                        raise ValueError("Error: Year not >= 2020")
-        
+                        raise ValueError(f"Unknown market_type: {market_type}")
+                
                 df = pd.concat([df1, df2])
                 df = df.sort_values(by='transaction')
-                df['transaction_date'] = pd.to_datetime(df['transaction']).dt.date  # Extract date part
+                df['transaction_date'] = pd.to_datetime(df['transaction']).dt.date
                 grouped = df.groupby('transaction_date')
-                
                 save_date = dt1.date()
                 group = grouped.get_group(save_date)
                 daily_filename = f"{savepath}orderbook_{save_date}.csv"
-                compression_options = dict(method='zip', archive_name=f'{daily_filename.split("/")[-1]}')
-                group.drop(columns='transaction_date').sort_values(by='transaction').fillna("").to_csv(f'{daily_filename}.zip', compression=compression_options)
+                compression_options = dict(method='zip', archive_name=Path(daily_filename).name)
+                group.drop(columns='transaction_date').sort_values(by='transaction').fillna("").to_csv(
+                    f'{daily_filename}.zip', compression=compression_options)
                 pbar.update(1)
         
         print("\nWriting CSV data completed.")
