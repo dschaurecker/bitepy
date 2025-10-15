@@ -274,13 +274,28 @@ class Data:
         # Remove iceberg orders
         iceberg_IDs = df.loc[df['orderType'] == 'Iceberg', 'originalOrderId'].unique()
         df = df.loc[~df['originalOrderId'].isin(iceberg_IDs)]
+
+        # Replace letters with numbers in originalOrderId and orderId
+        unique_letters = sorted(df['originalOrderId'].astype(str).str.findall(r'[A-Za-z]').str.join('').unique())
+        # Create mapping of unique letters to numbers starting from 11
+        letter_to_num = {letter: str(i+11) for i, letter in enumerate(unique_letters)}
+        # Function to replace letters with numbers
+        def replace_letters(order_id):
+            order_id = str(order_id)
+            for letter, num in letter_to_num.items():
+                order_id = order_id.replace(letter, num)
+            return order_id
+
+        # Apply replacement to originalOrderId column
+        df['originalOrderId'] = df['originalOrderId'].apply(replace_letters)
+        df['orderId'] = df['orderId'].apply(replace_letters)
         
         # Rename columns to standardized format
         df = df.rename(columns={
             'orderId': 'order',
             'originalOrderId': 'initial',
             'deliveryStart': 'start',
-            'createdTime': 'transaction',
+            'updatedTime': 'transaction',
             'expirationTime': 'validity',
             'volume': 'quantity',
             'action': 'action_original'
@@ -343,6 +358,9 @@ class Data:
         
         df = df.loc[lambda x: ~(x["action"] == "H")]
         df = df.drop(["order", "action", "action_original"], axis=1, errors='ignore')
+
+        # Filter out orders where validity time is not after transaction time; Sometimes orders are added and deleted at the same time.
+        df = df[df['validity'] > df['transaction']]
         
         # Convert timestamps to string format
         df["start"] = df["start"].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
