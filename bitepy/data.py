@@ -234,11 +234,12 @@ class Data:
     
     
     def _read_nordpool_table(self, date, marketdatapath):
-        """Read and process NordPool parquet files for a specific date."""
-        year = str(date.year)
-        month = f"{date.month:02d}"
-        day = f"{date.day:02d}"
-        folder_path = Path(marketdatapath) / year / month / day
+        """Read and process NordPool parquet files for a specific date.
+           Nordpool contains flags for full and partial execution of orders. We disregard this, as it will become apparent in our backtesting LOB traversal. After partial execution, orders are sometimes modified, deleted etc., this all stays relevant and is handled.
+           We also currently still disregard FoK and IoC orders (treat them as 0 validity duration). They have all the same updateTime in their message-chain.
+        """
+        date_folder = date.strftime("%Y%m%d")
+        folder_path = Path(marketdatapath) / date_folder
         
         if not folder_path.exists():
             raise FileNotFoundError(f"Folder not found: {folder_path}")
@@ -259,6 +260,7 @@ class Data:
         # Convert timestamps (needed for subsequent filtering and processing)
         df = (df
             .assign(createdTime=lambda x: pd.to_datetime(x['createdTime'], format='ISO8601'))
+            .assign(updatedTime=lambda x: pd.to_datetime(x['updatedTime'], format='ISO8601'))
             .assign(expirationTime=lambda x: pd.to_datetime(x['expirationTime'], format='ISO8601'))
             .assign(deliveryStart=lambda x: pd.to_datetime(x['deliveryStart'], format='ISO8601'))
             .assign(deliveryEnd=lambda x: pd.to_datetime(x['deliveryEnd'], format='ISO8601'))
@@ -340,6 +342,7 @@ class Data:
         df["df_index_copy"] = df.index
         merged = pd.merge(cancel_messages, df.loc[indexer_messA_with_cancel], on='order')
         df.loc[merged["df_index_copy"].to_numpy(), "validity"] = merged["transaction_x"].to_numpy()
+        df.drop("df_index_copy", axis=1, inplace=True)
         
         df = df.loc[lambda x: ~(x["action"] == "D")]
         
@@ -366,6 +369,9 @@ class Data:
         df["start"] = df["start"].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
         df["transaction"] = df["transaction"].dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
         df["validity"] = df["validity"].dt.strftime('%Y-%m-%dT%H:%M:%S.%f').str[:-3] + 'Z'
+
+        # rename side to all uppercase
+        df['side'] = df['side'].str.upper()
         
         # Select and order final columns
         df = df[['initial', 'side', 'start', 'transaction', 'validity', 'price', 'quantity']]
@@ -446,6 +452,10 @@ class Data:
                 df = df.sort_values(by='transaction')
                 df['transaction_date'] = pd.to_datetime(df['transaction']).dt.date
                 grouped = df.groupby('transaction_date')
+
+                # round price to 2 decimals and quantity to 1 decimal
+                df['price'] = df['price'].round(2)
+                df['quantity'] = df['quantity'].round(1)
                 
                 save_date = dt1.date()
                 group = grouped.get_group(save_date)
