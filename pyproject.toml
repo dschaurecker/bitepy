@@ -9,7 +9,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "bitepy"
-version = "0.6.3"
+version = "0.6.4"
 authors = [
   { name="David Schaurecker", email="dschaurecker@gmail.com" },
 ]
