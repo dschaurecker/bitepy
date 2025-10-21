@@ -142,6 +142,11 @@ else()
     target_compile_definitions(_bitepy PRIVATE HAS_REMOTE_API=0)
 endif()
 
+# Add Windows-specific debugging library for stack traces
+if(WIN32)
+    target_link_libraries(_bitepy PRIVATE dbghelp)  # Fixed target name from _bite to _bitepy
+endif()
+
 target_link_libraries(_bitepy
     PRIVATE
         pybind11::module  # pybind11
