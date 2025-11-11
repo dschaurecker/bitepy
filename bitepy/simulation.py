@@ -415,6 +415,7 @@ class Simulation:
 
         if not decision_record.empty:
             decision_record["hour"] = pd.to_datetime(decision_record["hour"], utc=True)
+            decision_record["cycles"] = np.round(decision_record["cycles"].astype(float), 2)
         if not price_record.empty:
             price_record["hour"] = pd.to_datetime(price_record["hour"], utc=True)
         if not accepted_orders.empty:

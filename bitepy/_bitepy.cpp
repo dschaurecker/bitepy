@@ -235,6 +235,7 @@ PYBIND11_MODULE(_bitepy, m) {
                 // pyRecord["final_reward"] = record.finalReward;
                 pyRecord["full_reward"] = record.fullReward;
                 pyRecord["id_reward_no_deg"] = record.idRewardNoDeg;
+                pyRecord["cycles"] = record.cycles;
                 // Append the record to the results list
                 decisionRec.append(pyRecord);
             }
