@@ -38,6 +38,7 @@ class Simulation:
                  withdraw_max=5.,
                  inject_max=5.,
                  log_transactions=False,
+                 only_traverse_lob=False,
                  cycle_limit: float = None,):
                 #  forecast_horizon_start=10*60,
                 #  forecast_horizon_end=75):
@@ -61,6 +62,7 @@ class Simulation:
             withdraw_max (float, optional): The maximum withdrawal power of the storage unit (MW). Default is 5.0.
             inject_max (float, optional): The maximum injection power of the storage unit (MW). Default is 5.0.
             log_transactions (bool, optional): If True, we run the simulation only to log transactions data of the market, no optimization is performed. Default is False.
+            only_traverse_lob: Whether to only traverse the LOB and not call any DP solves. (bool, default: False)
             cycle_limit: The limit on the number of cycles per Berlin-time day. Setting it comes at a cost in terms of solve time. (float, > 0). Default is None, where no cycle limit is enforced.
         """
         # forecast_horizon_start (int, optional): The start of the forecast horizon (min). Default is 600.
@@ -123,6 +125,7 @@ class Simulation:
         self._sim_cpp.params.injectMax = inject_max
         self._sim_cpp.params.minuteDelay = trading_delay
         self._sim_cpp.params.logTransactions = log_transactions
+        self._sim_cpp.params.onlyTraverseLOB = only_traverse_lob
         if cycle_limit is not None:
             self._sim_cpp.params.cycleLimit = float(cycle_limit)
         # self._sim_cpp.params.foreHorizonStart = forecast_horizon_start
@@ -519,6 +522,7 @@ class Simulation:
         print("Injection Maximum:", self._sim_cpp.params.injectMax, "MW")
         print("Withdrawal Maximum:", self._sim_cpp.params.withdrawMax, "MW")
         print("Log Transactions:", self._sim_cpp.params.logTransactions)
+        print("Only Traverse LOB:", self._sim_cpp.params.onlyTraverseLOB)
         print("Cycle Limit:", cycleLimit)
         # print("Forecast Horizon Start:", self._sim_cpp.params.foreHorizonStart, "min")
         # print("Forecast Horizon End:", self._sim_cpp.params.foreHorizonEnd, "min")
@@ -682,3 +686,202 @@ class Simulation:
         self._sim_cpp.clearLimitOrderMatches() # clear existing matches
         
         return matches_df
+
+    def has_orders_remaining(self) -> bool:
+        """
+        Check if there are remaining orders in the order queue.
+        
+        Returns
+        -------
+        bool
+            True if there are remaining orders in the queue, False otherwise.
+        """
+        return self._sim_cpp.hasOrdersRemaining()
+
+    def set_stop_time(self, stop_time: pd.Timestamp):
+        """
+        Set a datetime with millisecond precision to stop the simulation once.
+        
+        The simulation will stop only once, if the last order added has a submission time
+        after the stop time. Once the simulation has stopped, the stop time is automatically
+        cleared, allowing you to set a new one.
+        
+        Parameters
+        ----------
+        stop_time : pd.Timestamp
+            A timezone-aware timestamp with millisecond precision when the simulation should stop.
+            The simulation will stop if the last processed order's submission time is > this stop time.
+        
+        Raises
+        ------
+        ValueError
+            If stop_time is not timezone aware.
+        
+        Notes
+        -----
+        - The stop time is checked after each order is processed
+        - The simulation stops only once per stop time setting
+        - After stopping, the stop time is automatically cleared
+        - You can set a new stop time after the simulation has stopped
+        - The stop time is compared against the order's submission time (transaction time)
+        
+        """
+        # Check if timezone aware
+        if stop_time.tzinfo is None:
+            raise ValueError("stop_time must be timezone aware")
+        
+        # Convert to UTC
+        stop_time_utc = stop_time.astimezone(pytz.utc)
+        
+        # Convert to milliseconds since epoch
+        stop_time_ms = int(stop_time_utc.timestamp() * 1000)
+        
+        # Call C++ method
+        self._sim_cpp.setStopTime(stop_time_ms)
+
+    def solve(self) -> pd.DataFrame:
+        """
+        Solve the dynamic programming problem once using the time of the last placed order.
+
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame containing the suggested to be executed market orders from the solve.
+            Columns include: dp_run, time, last_solve_time, hour, reward,
+            reward_incl_deg_costs, volume, type, final_pos, final_stor.
+
+        Notes
+        -----
+        This function calls the C++ solve() method once. It does not run the
+        full simulation, only performs a single DP solve at the time of the
+        last placed order. If no orders have been placed yet, the behavior
+        depends on the initial state of _lastOrder_placementTime.
+
+        Example
+        -------
+        >>> orders_df = sim.solve()
+        """
+        # Call C++ method (no parameters needed - uses last order placement time)
+        order_list = self._sim_cpp.solve()
+        
+        # Convert list of dicts to pandas DataFrame
+        if not order_list:
+            # Return empty DataFrame with expected columns
+            return pd.DataFrame(columns=[
+                'dp_run', 'time', 'last_solve_time', 'hour', 'reward',
+                'reward_incl_deg_costs', 'volume', 'type', 'final_pos', 'final_stor'
+            ])
+        
+        order_df = pd.DataFrame(order_list)
+        order_df['time'] = pd.to_datetime(order_df['time'], utc=True)
+        order_df['last_solve_time'] = pd.to_datetime(order_df['last_solve_time'], utc=True)
+        order_df['hour'] = pd.to_datetime(order_df['hour'], utc=True)
+        
+        return order_df
+
+    def transform_lob_to_levels(
+        self,
+        lob_state_df: pd.DataFrame,
+        exchange: str = "EPEX",
+        product_name: str = "XBID_Hour_Power",
+        delivery_area: str = "10YDE-VE-------2",
+        product_duration_hours: int = 1
+    ) -> pd.DataFrame:
+        """
+        Transforms the output of get_limit_order_book_state (individual orders)
+        into an aggregated, price-level-based DataFrame.
+
+        Parameters
+        ----------
+        lob_state_df : pd.DataFrame
+            The DataFrame returned by get_limit_order_book_state.
+            Must contain columns: 'delivery_time', 'side', 'price', 'volume'.
+        exchange : str, optional
+            Static value for the 'exchange' column in the output.
+        product_name : str, optional
+            Static value for the 'product' column in the output.
+        delivery_area : str, optional
+            Static value for the 'deliveryArea' column in the output.
+        product_duration_hours : int, optional
+            Duration of the product in hours, used to calculate
+            deliveryEndUtc from delivery_time (which is used as deliveryStartUtc).
+            Default is 1.
+
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame in the target format with aggregated price levels and columns:
+            ['exchange', 'product', 'deliveryStartUtc', 'deliveryEndUtc',
+            'deliveryArea', 'side', 'level', 'price', 'quantity']
+        """
+        
+        # Define the target column order
+        target_columns = [
+            'exchange', 'product', 'deliveryStartUtc', 'deliveryEndUtc',
+            'deliveryArea', 'side', 'level', 'price', 'quantity'
+        ]
+        
+        # Keep only the columns we need from the start
+        source_columns = ['delivery_time', 'side', 'price', 'volume']
+        
+        # Handle empty input DataFrame
+        if lob_state_df.empty:
+            return pd.DataFrame(columns=target_columns)
+
+        all_orders_dfs = []
+        product_duration = pd.Timedelta(hours=product_duration_hours)
+
+        # Group by each product (identified by its delivery_time)
+        for delivery_time, product_df in lob_state_df[source_columns].groupby('delivery_time'):
+            
+            delivery_start_utc = delivery_time
+            delivery_end_utc = delivery_start_utc + product_duration
+
+            # --- Process Bids (Source 'buy' side) ---
+            buys_df = product_df[product_df['side'] == 'buy']
+            if not buys_df.empty:
+                # We assume buys_df is already sorted by price (descending)
+                bids_1_to_1 = buys_df.copy().reset_index(drop=True)
+                
+                # Set level as the order rank
+                bids_1_to_1['level'] = bids_1_to_1.index
+                bids_1_to_1['side'] = 'bid'
+                bids_1_to_1 = bids_1_to_1.rename(columns={'volume': 'quantity'})
+
+                # Add common metadata
+                bids_1_to_1['exchange'] = exchange
+                bids_1_to_1['product'] = product_name
+                bids_1_to_1['deliveryStartUtc'] = delivery_start_utc
+                bids_1_to_1['deliveryEndUtc'] = delivery_end_utc
+                bids_1_to_1['deliveryArea'] = delivery_area
+                
+                all_orders_dfs.append(bids_1_to_1[target_columns]) # Select only target cols
+
+            # --- Process Asks (Source 'sell' side) ---
+            sells_df = product_df[product_df['side'] == 'sell']
+            if not sells_df.empty:
+                # We assume sells_df is already sorted by price (ascending)
+                asks_1_to_1 = sells_df.copy().reset_index(drop=True)
+
+                # Set level as the order rank
+                asks_1_to_1['level'] = asks_1_to_1.index
+                asks_1_to_1['side'] = 'ask'
+                asks_1_to_1 = asks_1_to_1.rename(columns={'volume': 'quantity'})
+
+                # Add common metadata
+                asks_1_to_1['exchange'] = exchange
+                asks_1_to_1['product'] = product_name
+                asks_1_to_1['deliveryStartUtc'] = delivery_start_utc
+                asks_1_to_1['deliveryEndUtc'] = delivery_end_utc
+                asks_1_to_1['deliveryArea'] = delivery_area
+                
+                all_orders_dfs.append(asks_1_to_1[target_columns]) # Select only target cols
+
+        # Handle case where input was not empty but contained no orders
+        if not all_orders_dfs:
+            return pd.DataFrame(columns=target_columns)
+
+        # Combine all products and sides into one DataFrame
+        final_df = pd.concat(all_orders_dfs, ignore_index=True)
+
+        return final_df

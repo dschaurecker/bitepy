@@ -150,7 +150,10 @@ PYBIND11_MODULE(_bitepy, m) {
                     &SimulationParameters::setTradingStartMinutePy)
         .def_property("cycleLimit",
                     &SimulationParameters::getCycleLimitPy,
-                    &SimulationParameters::setCycleLimitPy);
+                    &SimulationParameters::setCycleLimitPy)
+        .def_property("onlyTraverseLOB",
+            &SimulationParameters::getOnlyTraverseLOBPy,
+            &SimulationParameters::setOnlyTraverseLOBPy);
         
         // Method to print parameters
         // .def("printParameters", &simParams::printParameters);
@@ -208,6 +211,14 @@ PYBIND11_MODULE(_bitepy, m) {
         })
 
         .def("clearLimitOrderMatches", &Simulation::clearLimitOrderMatches)
+
+        // Stop time with millisecond precision functionality
+        .def("setStopTime", &Simulation::setStopTime, py::arg("stop_time_ms"),
+            "Set a stop time in milliseconds since epoch. Simulation will stop once if the last order's submission time is after this stop time.")
+
+        // Check if orders remain in queue
+        .def("hasOrdersRemaining", &Simulation::hasOrdersRemaining,
+            "Check if there are remaining orders in the order queue")
 
         // .def("loadForecastMapFromCSV", &Simulation::loadForecastMapFromCSV)
         // .def("loadForecastMapFromPandas", &Simulation::loadForecastMapFromPandas)
@@ -387,5 +398,26 @@ PYBIND11_MODULE(_bitepy, m) {
 
             return vol_price_list;
         }, py::arg("last"), py::arg("frequency"), py::arg("volumes"),
-        "Returns a list of dictionaries with volume and price pairs.");
+        "Returns a list of dictionaries with volume and price pairs.")
+        
+        // Solve the dynamic programming problem using the last placed order's time
+        .def("solve", [](Simulation &self) {
+            auto orders = self.solve();
+            py::list orderList;
+            for (const auto &order : orders) {
+                py::dict pyOrder;
+                pyOrder["dp_run"] = order.dpRun;
+                pyOrder["time"] = ExecMarketOrder::epochToDateTimeMS(order.time);
+                pyOrder["last_solve_time"] = ExecMarketOrder::epochToDateTimeMS(order.lastSolveTime);
+                pyOrder["hour"] = ExecMarketOrder::epochToDateTime(order.hour);
+                pyOrder["reward"] = order.reward / 1000.0;
+                pyOrder["reward_incl_deg_costs"] = order.rewardInclDegCosts / 1000.0;
+                pyOrder["volume"] = order.volume / 10.0;
+                pyOrder["type"] = order.type == LimitOrder::Type::Buy ? "Buy" : "Sell";
+                pyOrder["final_pos"] = order.finalPos / 10.0;
+                pyOrder["final_stor"] = order.finalStor / 10.0;
+                orderList.append(pyOrder);
+            }
+            return orderList;
+        }, "Solve the dynamic programming problem once using the time of the last placed order. Returns a list of executed market orders.");
 }
