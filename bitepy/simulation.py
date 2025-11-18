@@ -885,3 +885,134 @@ class Simulation:
         final_df = pd.concat(all_orders_dfs, ignore_index=True)
 
         return final_df
+
+    def get_limit_order_book_state(self, max_action: float = None):
+        """
+        Get the current state of all active limit order books at the simulation's current time.
+        
+        This method returns, for each tradable product (delivery hour), the individual limit orders
+        in the buy and sell queues with all their attributes, up to a cumulative volume of max_action.
+        The query time is automatically set to the simulation's current time (last processed order).
+        
+        Parameters
+        ----------
+        max_action : float, optional
+            The maximum cumulative volume to query in MW (= MWh for 1-hour products).
+            If None (default), uses inject_max + withdraw_max from simulation parameters.
+            Must be > 0 if specified.
+        
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame containing the limit orders with the following columns:
+                - delivery_time: The delivery time of the product (UTC timestamp)
+                - side: 'sell' or 'buy' (sell orders are where you can buy from, buy orders are where you can sell to)
+                - order_id: The unique order ID
+                - initial_id: The initial order ID (for tracking order modifications)
+                - start_time: When the order was placed (UTC timestamp)
+                - cancel_time: When the order expires (UTC timestamp)
+                - price: The limit order price in EUR/MWh
+                - volume: The order volume in MWh
+                - is_forecast: Whether this is a forecast order (bool)
+                - cumulative_volume: The cumulative volume up to and including this order in MWh
+        
+        Notes
+        -----
+        - Uses the simulation's internal current time (_lastOrder_placementTime)
+        - Sell orders are sorted by ascending price (cheapest first = best for buying)
+        - Buy orders are sorted by descending price (highest first = best for selling)
+        - Orders are filtered to exclude expired orders at the query time
+        - Cumulative volume stops at max_action (default: inject_max + withdraw_max)
+        - Each row represents one limit order in the order book
+        
+        Example
+        -------
+        >>> # Query order book state with default max_action (inject_max + withdraw_max)
+        >>> lob_state = sim.get_limit_order_book_state()
+        >>> # Query with custom max_action
+        >>> lob_state = sim.get_limit_order_book_state(max_action=20.0)
+        >>> # Filter to see sell orders for a specific product
+        >>> product_sells = lob_state[(lob_state['delivery_time'] == some_time) & (lob_state['side'] == 'sell')]
+        >>> # See the best (cheapest) sell price
+        >>> best_sell_price = product_sells.iloc[0]['price']
+        >>> # Filter to see only forecast orders
+        >>> forecast_orders = lob_state[lob_state['is_forecast'] == True]
+        """
+        # Determine max_action value
+        if max_action is None:
+            # Use inject_max + withdraw_max as default
+            max_action_value = self._sim_cpp.params.injectMax + self._sim_cpp.params.withdrawMax
+        else:
+            # Validate that max_action is positive
+            if max_action <= 0:
+                raise ValueError("max_action must be > 0")
+            max_action_value = max_action
+        
+        # Call C++ function (uses simulation's current time internally)
+        lob_state_dict = self._sim_cpp.getLimitOrderBookState(max_action_value)
+        
+        # Convert to DataFrame
+        rows = []
+        for delivery_time_ms, data in lob_state_dict.items():
+            delivery_time = pd.Timestamp(delivery_time_ms, unit='ms', tz='UTC')
+            
+            # Process sell orders (where we can buy from)
+            sell_ids = data['sell_ids']
+            sell_initial_ids = data['sell_initial_ids']
+            sell_starts = data['sell_starts']
+            sell_cancels = data['sell_cancels']
+            sell_prices = data['sell_prices']
+            sell_volumes = data['sell_volumes']
+            sell_forecasts = data['sell_forecasts']
+            
+            cumulative_sell_volume = 0.0
+            for order_id, initial_id, start, cancel, price, volume, forecast in zip(
+                sell_ids, sell_initial_ids, sell_starts, sell_cancels, sell_prices, sell_volumes, sell_forecasts
+            ):
+                cumulative_sell_volume += volume
+                # Handle sentinel cancel time values (e.g., max int64) that overflow pandas timestamps
+                cancel_ts = pd.NaT if int(cancel) > pd.Timestamp.max.value // 1_000_000 else pd.Timestamp(int(cancel), unit='ms', tz='UTC')
+                rows.append({
+                    'delivery_time': delivery_time,
+                    'side': 'sell',
+                    'order_id': int(order_id),
+                    'initial_id': int(initial_id),
+                    'start_time': pd.Timestamp(int(start), unit='ms', tz='UTC'),
+                    'cancel_time': cancel_ts,
+                    'price': price,
+                    'volume': volume,
+                    'is_forecast': bool(forecast),
+                    'cumulative_volume': cumulative_sell_volume
+                })
+            
+            # Process buy orders (where we can sell to)
+            buy_ids = data['buy_ids']
+            buy_initial_ids = data['buy_initial_ids']
+            buy_starts = data['buy_starts']
+            buy_cancels = data['buy_cancels']
+            buy_prices = data['buy_prices']
+            buy_volumes = data['buy_volumes']
+            buy_forecasts = data['buy_forecasts']
+            
+            cumulative_buy_volume = 0.0
+            for order_id, initial_id, start, cancel, price, volume, forecast in zip(
+                buy_ids, buy_initial_ids, buy_starts, buy_cancels, buy_prices, buy_volumes, buy_forecasts
+            ):
+                cumulative_buy_volume += volume
+                # Handle sentinel cancel time values (e.g., max int64) that overflow pandas timestamps
+                cancel_ts = pd.NaT if int(cancel) > pd.Timestamp.max.value // 1_000_000 else pd.Timestamp(int(cancel), unit='ms', tz='UTC')
+                rows.append({
+                    'delivery_time': delivery_time,
+                    'side': 'buy',
+                    'order_id': int(order_id),
+                    'initial_id': int(initial_id),
+                    'start_time': pd.Timestamp(int(start), unit='ms', tz='UTC'),
+                    'cancel_time': cancel_ts,
+                    'price': price,
+                    'volume': volume,
+                    'is_forecast': bool(forecast),
+                    'cumulative_volume': cumulative_buy_volume
+                })
+        
+        df = pd.DataFrame(rows)
+        return df

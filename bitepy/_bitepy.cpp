@@ -233,6 +233,42 @@ PYBIND11_MODULE(_bitepy, m) {
             return self.returnReward();
         })
 
+        // Get limit order book state (using simulation's current time)
+        .def("getLimitOrderBookState", [](Simulation &self, double maxAction) {
+            auto lobState = self.getLimitOrderBookState(maxAction);
+            py::dict result;
+            
+            for (const auto& deliveryPair : lobState) {
+                int64_t deliveryTime = deliveryPair.first;
+                const auto& dataMap = deliveryPair.second;
+                
+                py::dict productData;
+                // Sell order attributes
+                productData["sell_ids"] = dataMap.at("sell_ids");
+                productData["sell_initial_ids"] = dataMap.at("sell_initial_ids");
+                productData["sell_starts"] = dataMap.at("sell_starts");
+                productData["sell_cancels"] = dataMap.at("sell_cancels");
+                productData["sell_prices"] = dataMap.at("sell_prices");
+                productData["sell_volumes"] = dataMap.at("sell_volumes");
+                productData["sell_forecasts"] = dataMap.at("sell_forecasts");
+                
+                // Buy order attributes
+                productData["buy_ids"] = dataMap.at("buy_ids");
+                productData["buy_initial_ids"] = dataMap.at("buy_initial_ids");
+                productData["buy_starts"] = dataMap.at("buy_starts");
+                productData["buy_cancels"] = dataMap.at("buy_cancels");
+                productData["buy_prices"] = dataMap.at("buy_prices");
+                productData["buy_volumes"] = dataMap.at("buy_volumes");
+                productData["buy_forecasts"] = dataMap.at("buy_forecasts");
+                
+                result[py::int_(deliveryTime)] = productData;
+            }
+            
+            return result;
+        }, py::arg("max_action"),
+        "Get the current state of all limit order books with all order attributes")
+
+
         .def("getLogs", [](sim &self) {
             // C++ -> Python
             auto decRecord = self.getDecisionData();
