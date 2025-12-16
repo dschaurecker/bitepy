@@ -435,6 +435,17 @@ PYBIND11_MODULE(_bitepy, m) {
             return vol_price_list;
         }, py::arg("last"), py::arg("frequency"), py::arg("volumes"),
         "Returns a list of dictionaries with volume and price pairs.")
+
+        // Get the last order placement time in milliseconds since epoch
+        .def("getLastOrderPlacementTimeMs", [](Simulation &self) {
+            return self._lastOrder_placementTime;
+        }, "Get the last order placement time in milliseconds since epoch (UTC)")
+
+        .def("hasStoppedAtStopTime", &Simulation::hasStoppedAtStopTime,
+            "Check if the simulation has stopped due to the stop time being reached")
+
+        .def("reachedEndOfDay", &Simulation::reachedEndOfDay, py::arg("is_last"),
+            "Check if the order queue has reached the end (mirrors run_one_day is_last logic)")
         
         // Solve the dynamic programming problem using the last placed order's time
         .def("solve", [](Simulation &self) {

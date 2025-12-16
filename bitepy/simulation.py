@@ -1016,3 +1016,102 @@ class Simulation:
         
         df = pd.DataFrame(rows)
         return df
+
+    def reached_end_of_day(self, is_last: bool) -> bool:
+        """
+        Check if the order queue has reached the end for this day.
+        
+        This function mirrors the logic of run_one_day(is_last) for checking
+        whether we've processed all available orders in the current batch.
+        
+        Parameters
+        ----------
+        is_last : bool
+            Whether this is the last data batch (same semantics as run_one_day).
+            - If False: indicates more data-days will be loaded after this batch
+            - If True: indicates this is the final batch of data-days for this simulation
+        
+        Returns
+        -------
+        bool
+            True if there are no more orders to process in the queue, False otherwise.
+        
+        Notes
+        -----
+        - Returns True when orderQueue.hasNext() is False in C++
+        - The is_last parameter is kept for API consistency with run_one_day
+        - Use this to check if the simulation stopped because it ran out of orders
+          vs. stopping due to a stop time or stop hour
+        
+        Example
+        -------
+        >>> sim.run_one_day(is_last=False)
+        >>> if sim.reached_end_of_day(is_last=False):
+        ...     print("Processed all orders in current batch, ready for next day's data")
+        >>> elif sim.has_stopped_at_stop_time():
+        ...     print("Stopped at specified stop time")
+        """
+        return self._sim_cpp.reachedEndOfDay(is_last)
+
+    def has_stopped_at_stop_time(self) -> bool:
+        """
+        Check if the simulation has stopped due to the stop time being reached. Is set to false again once we set a new stop time.
+        
+        Returns
+        -------
+        bool
+            True if the simulation stopped because the last order's submission time
+            exceeded the set stop time. False otherwise.
+        
+        Notes
+        -----
+        - This flag is set when the simulation stops due to a stop time set via set_stop_time()
+        - The flag is automatically reset when a new stop time is set
+        - Use this to determine if a simulation pause was due to the stop time condition
+        
+        Example
+        -------
+        >>> sim.set_stop_time(pd.Timestamp('2024-01-15 12:30:00', tz='UTC'))
+        >>> sim.run_one_day(is_last=False)
+        >>> if sim.has_stopped_at_stop_time():
+        ...     print("Simulation stopped at the specified stop time")
+        """
+        return self._sim_cpp.hasStoppedAtStopTime()
+
+    def get_last_order_placement_time(self) -> pd.Timestamp:
+        """
+        Get the simulation's current time (last processed order's placement time) as a UTC datetime.
+        
+        This returns the internal `_lastOrder_placementTime` from the C++ simulation,
+        converted to a timezone-aware pandas Timestamp in UTC.
+        
+        Returns
+        -------
+        pd.Timestamp
+            The timestamp of the last processed order's placement time in UTC.
+            Returns pd.NaT if no orders have been processed yet (time is at minimum int64 value).
+        
+        Notes
+        -----
+        - The internal time is stored as milliseconds since epoch (Unix time)
+        - This is the time used by methods like get_limit_order_book_state() and solve()
+        - Before any orders are processed, this returns pd.NaT
+        
+        Example
+        -------
+        >>> sim.add_bin_to_orderqueue("path/to/data.bin")
+        >>> sim.run_one_day(is_last=False)
+        >>> current_time = sim.get_last_order_placement_time()
+        >>> print(current_time)
+        2024-01-15 12:30:45.123000+00:00
+        """
+        time_ms = self._sim_cpp.getLastOrderPlacementTimeMs()
+        
+        # Handle uninitialized state (minimum int64 value)
+        # In C++, it's initialized to std::numeric_limits<int64_t>::min()
+        import sys
+        if time_ms <= -sys.maxsize:
+            return pd.NaT
+        
+        # Convert milliseconds since epoch to UTC timestamp
+        return pd.Timestamp(time_ms, unit='ms', tz='UTC')
