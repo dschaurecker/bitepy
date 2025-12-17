@@ -213,7 +213,7 @@ PYBIND11_MODULE(_bitepy, m) {
         .def("clearLimitOrderMatches", &Simulation::clearLimitOrderMatches)
 
         // Stop time with millisecond precision functionality
-        .def("setStopTime", &Simulation::setStopTime, py::arg("stop_time_ms"),
+        .def("setStopTime", &Simulation::setStopTime, py::arg("stop_time_ms"), py::arg("verbose") = false,
             "Set a stop time in milliseconds since epoch. Simulation will stop once if the last order's submission time is after this stop time.")
 
         // Check if orders remain in queue

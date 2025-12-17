@@ -698,7 +698,7 @@ class Simulation:
         """
         return self._sim_cpp.hasOrdersRemaining()
 
-    def set_stop_time(self, stop_time: pd.Timestamp):
+    def set_stop_time(self, stop_time: pd.Timestamp, verbose: bool = False):
         """
         Set a datetime with millisecond precision to stop the simulation once.
         
@@ -711,7 +711,8 @@ class Simulation:
         stop_time : pd.Timestamp
             A timezone-aware timestamp with millisecond precision when the simulation should stop.
             The simulation will stop if the last processed order's submission time is > this stop time.
-        
+        verbose : bool, optional
+            Whether to print a message when the simulation stops.
         Raises
         ------
         ValueError
@@ -737,7 +738,7 @@ class Simulation:
         stop_time_ms = int(stop_time_utc.timestamp() * 1000)
         
         # Call C++ method
-        self._sim_cpp.setStopTime(stop_time_ms)
+        self._sim_cpp.setStopTime(stop_time_ms, verbose)
 
     def solve(self) -> pd.DataFrame:
         """
@@ -886,7 +887,7 @@ class Simulation:
 
         return final_df
 
-    def get_limit_order_book_state(self, max_action: float = None):
+    def get_limit_order_book_state(self, max_action: float = None, return_dict: bool = False):
         """
         Get the current state of all active limit order books at the simulation's current time.
         
@@ -900,10 +901,14 @@ class Simulation:
             The maximum cumulative volume to query in MW (= MWh for 1-hour products).
             If None (default), uses inject_max + withdraw_max from simulation parameters.
             Must be > 0 if specified.
+        return_dict : bool, optional
+            Whether to return the limit order book state as a dictionary.
+            If True, the return value is a dictionary with the delivery time as the key and the limit order book state as the value.
+            If False (default), the return value is a DataFrame.
         
         Returns
         -------
-        pd.DataFrame
+        pd.DataFrame or dict
             A DataFrame containing the limit orders with the following columns:
                 - delivery_time: The delivery time of the product (UTC timestamp)
                 - side: 'sell' or 'buy' (sell orders are where you can buy from, buy orders are where you can sell to)
@@ -950,6 +955,9 @@ class Simulation:
         
         # Call C++ function (uses simulation's current time internally)
         lob_state_dict = self._sim_cpp.getLimitOrderBookState(max_action_value)
+
+        if return_dict:
++            return lob_state_dict
         
         # Convert to DataFrame
         rows = []
