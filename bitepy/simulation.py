@@ -962,7 +962,7 @@ class Simulation:
         lob_state_dict = self._sim_cpp.getLimitOrderBookState(max_action_value)
 
         if return_dict:
-+            return lob_state_dict
+            return lob_state_dict
         
         # Convert to DataFrame
         rows = []
