@@ -153,7 +153,11 @@ PYBIND11_MODULE(_bitepy, m) {
                     &SimulationParameters::setCycleLimitPy)
         .def_property("onlyTraverseLOB",
             &SimulationParameters::getOnlyTraverseLOBPy,
-            &SimulationParameters::setOnlyTraverseLOBPy);
+            &SimulationParameters::setOnlyTraverseLOBPy)
+
+        .def_property("minHotQueueSize",
+            &SimulationParameters::getMinHotQueueSizePy,
+            &SimulationParameters::setMinHotQueueSizePy);
         
         // Method to print parameters
         // .def("printParameters", &simParams::printParameters);

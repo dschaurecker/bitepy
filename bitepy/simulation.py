@@ -39,7 +39,8 @@ class Simulation:
                  inject_max=5.,
                  log_transactions=False,
                  only_traverse_lob=False,
-                 cycle_limit: float = None,):
+                 cycle_limit: float = None,
+                 min_hot_queue_size: int = -1,):
                 #  forecast_horizon_start=10*60,
                 #  forecast_horizon_end=75):
         """
@@ -64,6 +65,7 @@ class Simulation:
             log_transactions (bool, optional): If True, we run the simulation only to log transactions data of the market, no optimization is performed. Default is False.
             only_traverse_lob: Whether to only traverse the LOB and not call any DP solves. (bool, default: False)
             cycle_limit: The limit on the number of cycles per Berlin-time day. Setting it comes at a cost in terms of solve time. (float, > 0). Default is None, where no cycle limit is enforced.
+            min_hot_queue_size: The minimum number of orders to keep in the hot cache for each order queue. (int, > 0, or -1 to disable and use only volume-based caching, default: -1)
         """
         # forecast_horizon_start (int, optional): The start of the forecast horizon (min). Default is 600.
         # forecast_horizon_end (int, optional): The end of the forecast horizon (min). Default is 75.
@@ -103,6 +105,8 @@ class Simulation:
         if cycle_limit is not None:
             if cycle_limit <= 0:
                 raise ValueError("cycle_limit must be > 0 if provided")
+        if min_hot_queue_size <= 0 and min_hot_queue_size != -1:
+            raise ValueError("min_hot_queue_size must be > 0 or -1 (to disable)")
         # if forecast_horizon_start < 0:
         #     raise ValueError("forecast_horizon_start must be >= 0")
         # if forecast_horizon_end < 0:
@@ -128,6 +132,7 @@ class Simulation:
         self._sim_cpp.params.onlyTraverseLOB = only_traverse_lob
         if cycle_limit is not None:
             self._sim_cpp.params.cycleLimit = float(cycle_limit)
+        self._sim_cpp.params.minHotQueueSize = min_hot_queue_size
         # self._sim_cpp.params.foreHorizonStart = forecast_horizon_start
         # self._sim_cpp.params.foreHorizonEnd = forecast_horizon_end
 
