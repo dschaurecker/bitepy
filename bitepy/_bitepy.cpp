@@ -244,26 +244,26 @@ PYBIND11_MODULE(_bitepy, m) {
             
             for (const auto& deliveryPair : lobState) {
                 int64_t deliveryTime = deliveryPair.first;
-                const auto& dataMap = deliveryPair.second;
+                const OrderBookData& obData = deliveryPair.second;
                 
                 py::dict productData;
-                // Sell order attributes
-                productData["sell_ids"] = dataMap.at("sell_ids");
-                productData["sell_initial_ids"] = dataMap.at("sell_initial_ids");
-                productData["sell_starts"] = dataMap.at("sell_starts");
-                productData["sell_cancels"] = dataMap.at("sell_cancels");
-                productData["sell_prices"] = dataMap.at("sell_prices");
-                productData["sell_volumes"] = dataMap.at("sell_volumes");
-                productData["sell_forecasts"] = dataMap.at("sell_forecasts");
+                // Sell order attributes (proper types preserved)
+                productData["sell_ids"] = obData.sell.ids;
+                productData["sell_initial_ids"] = obData.sell.initialIds;
+                productData["sell_starts"] = obData.sell.starts;
+                productData["sell_cancels"] = obData.sell.cancels;
+                productData["sell_prices"] = obData.sell.prices;
+                productData["sell_volumes"] = obData.sell.volumes;
+                productData["sell_forecasts"] = obData.sell.forecasts;
                 
-                // Buy order attributes
-                productData["buy_ids"] = dataMap.at("buy_ids");
-                productData["buy_initial_ids"] = dataMap.at("buy_initial_ids");
-                productData["buy_starts"] = dataMap.at("buy_starts");
-                productData["buy_cancels"] = dataMap.at("buy_cancels");
-                productData["buy_prices"] = dataMap.at("buy_prices");
-                productData["buy_volumes"] = dataMap.at("buy_volumes");
-                productData["buy_forecasts"] = dataMap.at("buy_forecasts");
+                // Buy order attributes (proper types preserved)
+                productData["buy_ids"] = obData.buy.ids;
+                productData["buy_initial_ids"] = obData.buy.initialIds;
+                productData["buy_starts"] = obData.buy.starts;
+                productData["buy_cancels"] = obData.buy.cancels;
+                productData["buy_prices"] = obData.buy.prices;
+                productData["buy_volumes"] = obData.buy.volumes;
+                productData["buy_forecasts"] = obData.buy.forecasts;
                 
                 result[py::int_(deliveryTime)] = productData;
             }
