@@ -14,6 +14,7 @@ import pytz
 import os
 from datetime import timedelta
 from tqdm import tqdm
+import sys
 
 try:
     from ._bitepy import Simulation_cpp
@@ -894,11 +895,11 @@ class Simulation:
 
     def get_limit_order_book_state(self, max_action: float = None, return_dict: bool = False):
         """
-        Get the current state of all active limit order books at the simulation's current time.
+        Get the current state of all active limit order books at the last-set stop time.
         
         This method returns, for each tradable product (delivery hour), the individual limit orders
         in the buy and sell queues with all their attributes, up to a cumulative volume of max_action.
-        The query time is automatically set to the simulation's current time (last processed order).
+        The query time is automatically set to the last-set stop time.
         
         Parameters
         ----------
@@ -1122,7 +1123,40 @@ class Simulation:
         
         # Handle uninitialized state (minimum int64 value)
         # In C++, it's initialized to std::numeric_limits<int64_t>::min()
-        import sys
+        if time_ms <= -sys.maxsize:
+            return pd.NaT
+        
+        # Convert milliseconds since epoch to UTC timestamp
+        return pd.Timestamp(time_ms, unit='ms', tz='UTC')
+    def get_next_order_start_time(self) -> pd.Timestamp:
+        """
+        Get the order queue's next order start time as a UTC datetime.
+        
+        This peeks at the next order in the queue without consuming it, returning
+        its start time (placement time) converted to a timezone-aware pandas Timestamp in UTC.
+        
+        Returns
+        -------
+        pd.Timestamp
+            The timestamp of the next order's start time in UTC.
+            Returns pd.NaT if no more orders are available in the queue.
+        
+        Notes
+        -----
+        - The internal time is stored as milliseconds since epoch (Unix time)
+        - This does not advance the order queue; it only peeks at the next order
+        - Useful for determining when the next order will be processed
+        
+        Example
+        -------
+        >>> sim.add_bin_to_orderqueue("path/to/data.bin")
+        >>> next_time = sim.get_next_order_start_time()
+        >>> print(next_time)
+        2024-01-15 12:30:45.123000+00:00
+        """
+        time_ms = self._sim_cpp.getNextOrderStartTimeMs()
+        
+        # Handle case when no next order exists (minimum int64 value)
         if time_ms <= -sys.maxsize:
             return pd.NaT
         

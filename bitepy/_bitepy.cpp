@@ -445,6 +445,10 @@ PYBIND11_MODULE(_bitepy, m) {
             return self._lastOrder_placementTime;
         }, "Get the last order placement time in milliseconds since epoch (UTC)")
 
+        // Get the next order's start time in milliseconds since epoch (peek without consuming)
+        .def("getNextOrderStartTimeMs", &Simulation::getNextOrderStartTimeMs,
+            "Get the next order's start time in milliseconds since epoch (UTC) without consuming it")
+
         .def("hasStoppedAtStopTime", &Simulation::hasStoppedAtStopTime,
             "Check if the simulation has stopped due to the stop time being reached")
 
