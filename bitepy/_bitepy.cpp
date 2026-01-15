@@ -14,6 +14,7 @@
 #include <pybind11/chrono.h>       // if you need chrono conversions
 
 #include "Simulation.h"
+#include "tz.h"  // For timezone database configuration
 
 namespace py = pybind11;
 
@@ -22,6 +23,14 @@ using sim = Simulation;
 
 PYBIND11_MODULE(_bitepy, m) {
     m.doc() = "pybind11 wrapper for the Simulation C++ code";
+    // Timezone database configuration (Windows only - USE_OS_TZDB is not available on Windows)
+#if !USE_OS_TZDB
+    m.def("set_tzdb_path", &date::set_install,
+        py::arg("path"),
+        "Set the path to the IANA timezone database directory (Windows only). "
+        "The path should point to a directory containing tzdata files (africa, europe, etc.). "
+        "Must be called before any timezone operations.");
+#endif
     // Params class
     // **Expose SimulationParameters class**
     py::class_<simParams>(m, "SimulationParameters")
