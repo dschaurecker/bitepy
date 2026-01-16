@@ -1,5 +1,5 @@
 ######################################################################
-# Copyright (C) 2025 ETH Zurich
+# Copyright (C) 2026 ETH Zurich
 # BitePy: A Python Battery Intraday Trading Engine
 # Bits to Energy Lab - Chair of Information Management - ETH Zurich
 #
