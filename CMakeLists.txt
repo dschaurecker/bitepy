@@ -40,6 +40,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
+
 pybind11_add_module(_bitepy
     bitepy/_bitepy.cpp
     bitepy/cpp_source_submodule/bite/src/Simulation.cpp
