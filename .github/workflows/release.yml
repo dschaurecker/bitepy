@@ -1,43 +1,40 @@
 name: Release and Publish
 
-# Trigger on pushes to tags matching v* (e.g., v1.0, v0.2.1, v1.2.3-rc1)
 on:
   push:
     tags:
-      - 'v*' # Matches v, vX, vX.Y, vX.Y.Z and pre-release variants
+      - 'v*'
   workflow_dispatch: # Allows manual triggering
 
 jobs:
-  # Combined job for macOS, Windows, and Linux (manylinux) builds using cibuildwheel
   build_wheels:
-    # Job name includes the platform from the matrix for clarity in the UI
     name: Build Wheels (${{ matrix.platform }})
 
-    # Strategy defines the different platform configurations to run
     strategy:
       matrix:
-        # Use 'include' to define specific combinations for each platform
         include:
           - platform: macos # cibuildwheel platform identifier
             os: macos-latest # GitHub Actions runner OS
+            archs: "x86_64 arm64"
           - platform: windows # cibuildwheel platform identifier
             os: windows-latest # GitHub Actions runner OS
+            archs: "auto"
           - platform: linux # cibuildwheel platform identifier (builds manylinux)
             os: ubuntu-latest # GitHub Actions runner OS (runs Docker)
+            archs: "auto"
       fail-fast: false # Don't cancel all jobs if one platform fails
 
-    # Runner OS is determined by the matrix strategy
     runs-on: ${{ matrix.os }}
+    
+    env:
+      CIBW_ARCHS: ${{ matrix.archs }}
 
     steps:
-      # Step 1: Checkout main repository ONLY using default GITHUB_TOKEN
-      # Submodules handled manually later for consistent SSH key usage
       - name: Check out main repository
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      # Step 2: Set up SSH access for private submodule (Bash version)
       - name: Set up SSH access for private submodule (Bash)
         shell: bash
         run: |
@@ -52,55 +49,33 @@ jobs:
           ssh-keygen -l -f ~/.ssh/id_ed25519 || (echo "ERROR: Failed to load key fingerprint. Key format in secret is likely invalid." && exit 1)
           echo "Key loaded successfully by ssh-keygen."
 
-      # Step 3: Configure Git to use SSH instead of HTTPS for GitHub
-      # Using bash shell (available on all runners via Git Bash on Windows)
       - name: Configure Git to use SSH for github.com
         run: git config --global url."git@github.com:".insteadOf "https://github.com/"
         shell: bash
 
-      # Step 4: Initialize and update submodules manually using SSH
-      # Using bash shell
       - name: Initialize submodules
         run: |
           git submodule sync --recursive
           git submodule update --init --recursive
         shell: bash
-        # Source code including the private submodule is now fully checked out
 
-      # Step 5: Set up Python (just need one version to run cibuildwheel itself)
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step 6: Install cibuildwheel
       - name: Install cibuildwheel
         run: python -m pip install --upgrade pip cibuildwheel
 
-      # Step 7: Build wheels using cibuildwheel
-      # Configuration (Python versions, archs, env vars) should be read from pyproject.toml
-      # The specific platform (linux, macos, windows) is passed from the matrix include definition
       - name: Build wheels for ${{ matrix.platform }}
-        # env:
-        #   CIBW_BEFORE_BUILD: "pip install numpy --force-reinstall --no-cache-dir" # maybe not needed
         run: cibuildwheel --platform ${{ matrix.platform }}
-        # IMPORTANT: Make sure your pyproject.toml has the [tool.cibuildwheel] section
-        # configured correctly for all platforms, including Python versions ('build=' key),
-        # architectures ('archs=' key), and any necessary environment variables
-        # (using [tool.cibuildwheel.environment] or platform-specific sections like
-        # [tool.cibuildwheel.linux.environment], etc. for CMAKE_CXX_STANDARD etc.).
 
-      # Step 8: Upload wheels artifact
-      # cibuildwheel output is in './wheelhouse' by default
       - name: Upload wheels (${{ matrix.platform }})
         uses: actions/upload-artifact@v4
         with:
-          # Name the artifact based on the platform from the matrix
-          # This artifact will contain wheels for all Python versions built for this platform
           name: wheels-${{ matrix.platform }}
           path: ./wheelhouse
 
-  # --- Job to Publish to TestPyPI ---
   publish-testpypi:
     name: Publish to TestPyPI
     needs: build_wheels # Run after wheels are built
@@ -112,14 +87,12 @@ jobs:
     permissions:
       id-token: write # Allow workflow to get OIDC ID token for PyPI
       contents: read # Allow checkout if needed (though not strictly required by pypi-publish)
-    # Condition: Only run on pre-release tags (containing a hyphen, e.g., v1.0.0-rc1) or manual workflow dispatch
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && contains(github.ref_name, '-'))
 
     steps:
       - name: Download all wheel artifacts
         uses: actions/download-artifact@v4
         with:
-          # Download all artifacts matching the pattern into 'dist' directory
           pattern: wheels-*
           path: dist
           merge-multiple: true # Combine contents if artifacts have same name (shouldn't happen here)
@@ -129,25 +102,19 @@ jobs:
 
       - name: Publish package to TestPyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # No API token needed - uses OIDC via id-token permission and environment
         with:
-          # repository_url defaults to PyPI, explicitly set for TestPyPI
           repository_url: https://test.pypi.org/legacy/
-          # skip_existing: true # Optional: uncomment to prevent errors if version already exists
 
-  #--- Job to Publish to PyPI (Optional - Uncomment and configure carefully) ---
   publish-pypi:
     name: Publish to PyPI
     needs: build_wheels # Run after wheels are built
     runs-on: ubuntu-latest
-    # Define environment linked to PyPI trusted publishing config
     environment:
       name: pypi # MUST match the environment name configured in PyPI trusted publishing
       url: https://pypi.org/p/bitepy # Link to your project on PyPI (replace 'bite' if needed)
     permissions:
       id-token: write # Allow workflow to get OIDC ID token for PyPI
       contents: read
-    # Condition: Only run on tags that DO NOT contain a hyphen (e.g., v1.0.0, not v1.0.0-rc1)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
 
     steps:
@@ -163,9 +130,7 @@ jobs:
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # repository_url defaults to PyPI, no need to set it here
 
-  # --- Job to Create GitHub Release ---
   create-github-release:
     name: Create GitHub Release
     needs: build_wheels # Run after wheels are built
@@ -174,15 +139,11 @@ jobs:
       contents: write # Need write access to create release and upload assets
 
     steps:
-      # STEP 1: Checkout the repository code FIRST
       - name: Checkout repository
-        uses: actions/checkout@v4 # Or latest version
+        uses: actions/checkout@v4
         with:
-          # Fetch all history so --generate-notes can determine changes
-          # since the last release.
           fetch-depth: 0
 
-      # STEP 2: Download artifacts (can happen after checkout)
       - name: Download all wheel artifacts
         uses: actions/download-artifact@v4
         with:
@@ -212,8 +173,6 @@ jobs:
         if: steps.check_release.outputs.release_exists == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Ensure this workflow is triggered by a tag push, otherwise
-          # github.ref_name might be 'main' or a branch name.
           TAG_NAME: ${{ github.ref_name }}
         run: |
           echo "Creating release for tag ${TAG_NAME}"

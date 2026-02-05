@@ -30,7 +30,7 @@ jobs:
         
       - name: Build and install the package
         run: |
-          python -m pip install .
+          python -m pip install bitepy
 
       - name: Deploy to GitHub Pages
         run: |

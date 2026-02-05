@@ -1,245 +1,36 @@
-# name: Build wheels across OS and Python versions
-
-# on:
-#   push:
-#     branches:
-#       - main
-#   pull_request:
-#     branches:
-#       - main
-#   workflow_dispatch:  # to enable manual triggers
-  
-
-# jobs:
-#   build_manylinux:
-#     name: Build Manylinux Wheels (Linux)
-#     runs-on: ubuntu-latest
-#     container:
-#       image: quay.io/pypa/manylinux_2_28_x86_64
-#     strategy:
-#       matrix:
-#         python-version: ["3.8"] #, "3.9", "3.10", "3.11", "3.12", "3.13"]
-#     steps:
-#       - name: Check out repository
-#         uses: actions/checkout@v4
-#         with:
-#           submodules: false
-
-#       - name: Mark repo as safe for Git
-#         run: git config --global --add safe.directory /__w/bite/bite
-
-#     #   - name: Install ssh-keyscan (openssh-clients)
-#     #     run: yum install -y openssh-clients
-#       - name: Install SSH
-#         run: yum install -y openssh-clients
-
-#       - name: Set up SSH access for private submodule
-#         run: |
-#           mkdir -p ~/.ssh
-#           echo "${{ secrets.SUBMODULE_DEPLOY_KEY }}" > ~/.ssh/id_ed25519
-#           chmod 600 ~/.ssh/id_ed25519
-
-#           cat >> ~/.ssh/known_hosts <<EOF github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg= github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=EOF
-        
-#       - name: Initialize submodules
-#         run: |
-#           git submodule sync --recursive
-#           git submodule update --init --recursive
-
-#       - name: Install Python development libraries
-#         run: |
-#           # Adjust the package name according to the Python version.
-#           # For example, for Python 3.9:
-#           # if [ "${{ matrix.python-version }}" = "3.9" ]; then
-#           #     yum install -y python39-devel
-#           # elif [ "${{ matrix.python-version }}" = "3.8" ]; then
-#           #     yum install -y python38-devel
-#           # elif [ "${{ matrix.python-version }}" = "3.10" ]; then
-#           #     yum install -y python3.10-devel
-#           # elif [ "${{ matrix.python-version }}" = "3.11" ]; then
-#           #     yum install -y python3.11-devel
-#           # elif [ "${{ matrix.python-version }}" = "3.12" ]; then
-#           #     yum install -y python3.12-devel
-#           # elif [ "${{ matrix.python-version }}" = "3.13" ]; then
-#           #     yum install -y python3.13-devel
-#           # fi
-#           yum install -y python3-devel
-
-#       - name: Set up and install dependencies
-#         run: |
-#           # Remove dots to get a version string like "310" for Python 3.10
-#           ver_no_dot=$(echo "${{ matrix.python-version }}" | tr -d '.')
-#           # Prepend the manylinux Python directory to PATH.
-#           export PATH="/opt/python/cp${ver_no_dot}-cp${ver_no_dot}/bin:$PATH"
-#           python --version
-#           which python
-
-#           # Compute the library directory and library filename using sysconfig.
-#           LIBDIR=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
-#           LDLIB=$(python -c "import sysconfig; print(sysconfig.get_config_var('LDLIBRARY'))")
-
-#           # If the reported library is static (ends in .a), try to use the shared version.
-#           if echo "$LDLIB" | grep -q '\.a$'; then
-#             LDLIB_SHARED=$(echo "$LDLIB" | sed 's/\.a$/.so/')
-#             if [ -f "${LIBDIR}/${LDLIB_SHARED}" ]; then
-#               LDLIB="$LDLIB_SHARED"
-#             fi
-#           fi
-
-#           echo "Using Python library: ${LIBDIR}/${LDLIB}"
-
-#           # Pass the shared library path to CMake.
-#           export SKBUILD_CMAKE_ARGS="-DPython3_LIBRARIES:FILEPATH=${LIBDIR}/${LDLIB}"
-
-#           python -m pip install build "pybind11[global]" scikit-build
-#           python -m build --wheel --outdir dist
-#         shell: sh -e {0}
-#         env:
-#           CXXFLAGS: -std=c++17
-#           CMAKE_CXX_FLAGS: -std=c++17
-#           CMAKE_CXX_STANDARD: 17
-#           CMAKE_CXX_STANDARD_REQUIRED: ON
-          
-
-#       # - name: Set C++17 Standard
-#       #   run: |
-#       #     echo "CXXFLAGS=-std=c++17" >> $GITHUB_ENV
-#       #     echo "CMAKE_CXX_FLAGS=-std=c++17" >> $GITHUB_ENV
-#       #     echo "CMAKE_CXX_STANDARD=17" >> $GITHUB_ENV
-#       #     echo "CMAKE_CXX_STANDARD_REQUIRED=ON" >> $GITHUB_ENV
-
-#       # - name: Check Compiler Version
-#       #   run: g++ --version
-
-#       # - name: Install build dependencies
-#       #   run: pip install build "pybind11[global]"
-
-#       # - name: Build the wheel
-#       #   run: python -m build --wheel --outdir dist
-
-#       - name: Repair the wheel with auditwheel
-#         run: |
-#           for whl in dist/*.whl; do
-#             auditwheel repair "$whl" -w dist/
-#           done
-
-#       - name: Upload wheels (Manylinux)
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: manylinux-wheels-py${{ matrix.python-version }}
-#           path: dist/*manylinux*.whl
-
-#   build_native:
-#     name: Build Wheels (macOS & Windows)
-#     runs-on: ${{ matrix.os }}
-#     strategy:
-#       matrix:
-#         os: [macos-latest] #, windows-latest]
-#         python-version: ["3.8"] #, "3.9", "3.10", "3.11", "3.12", "3.13"]
-#       fail-fast: false
-#     steps:
-#       # Step 1: Checkout main repository ONLY using default GITHUB_TOKEN
-#       # No ssh-key, no submodules: recursive here.
-#       - name: Check out main repository
-#         uses: actions/checkout@v4
-#         # Ensure submodules are not checked out here automatically
-#         with:
-#           submodules: false
-
-#       # Step 2: Set up SSH access for the private submodule
-#       # Use the NEW private key you generated (e.g., github_actions_bite_deploy)
-#       # Stored in the SUBMODULE_DEPLOY_KEY secret
-#       - name: Set up SSH access for private submodule
-#         run: |
-#           mkdir -p ~/.ssh
-#           echo "${{ secrets.SUBMODULE_DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/id_ed25519
-#           # Note: using id_ed25519 as the filename here for simplicity,
-#           # ssh will pick it up automatically. Or use the specific new filename.
-#           chmod 600 ~/.ssh/id_ed25519
-#           ssh-keyscan github.com >> ~/.ssh/known_hosts
-#         shell: bash
-
-#       # Step 3: Configure Git to use SSH instead of HTTPS for GitHub
-#       # This ensures the submodule update uses the SSH key we just set up
-#       - name: Configure Git to use SSH for github.com
-#         run: git config --global url."git@github.com:".insteadOf "https://github.com/"
-#         shell: bash
-
-#       # Step 4: Initialize and update submodules manually
-#       # This will now use the SSH key via the URL rewrite
-#       - name: Initialize submodules
-#         run: |
-#           git submodule sync --recursive
-#           git submodule update --init --recursive
-#         shell: bash
-
-#       # --- Rest of your build steps ---
-
-#       - name: Set up Python ${{ matrix.python-version }}
-#         uses: actions/setup-python@v4
-#         with:
-#           python-version: ${{ matrix.python-version }}
-
-#       - name: Set C++17 Standard
-#         run: |
-#           echo "CXXFLAGS=-std=c++17" >> $GITHUB_ENV
-#           echo "CMAKE_CXX_FLAGS=-std=c++17" >> $GITHUB_ENV
-#           echo "CMAKE_CXX_STANDARD=17" >> $GITHUB_ENV
-#           echo "CMAKE_CXX_STANDARD_REQUIRED=ON" >> $GITHUB_ENV
-#         shell: bash
-
-#       - name: Install build dependencies
-#         run: |
-#           pip install build "pybind11[global]" scikit-build
-#           python -c "import skbuild"
-#         shell: bash
-
-#       - name: Build the wheel
-#         run: python -m build --wheel --outdir dist
-#         shell: bash
-
-#       - name: Upload wheels (Native)
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
-#           path: dist
-
-
 name: Build Wheels CI
 
 on: [workflow_dispatch] # push, pull_request, 
 
 jobs:
-  # Combined job for macOS, Windows, and Linux (manylinux) builds using cibuildwheel
   build_wheels:
-    # Job name includes the platform from the matrix for clarity in the UI
     name: Build Wheels (${{ matrix.platform }})
 
-    # Strategy defines the different platform configurations to run
     strategy:
       matrix:
-        # Use 'include' to define specific combinations for each platform
         include:
           - platform: macos # cibuildwheel platform identifier
             os: macos-latest # GitHub Actions runner OS
+            archs: "x86_64 arm64"
           - platform: windows # cibuildwheel platform identifier
             os: windows-latest # GitHub Actions runner OS
+            archs: "auto"
           - platform: linux # cibuildwheel platform identifier (builds manylinux)
             os: ubuntu-latest # GitHub Actions runner OS (runs Docker)
+            archs: "auto"
       fail-fast: false # Don't cancel all jobs if one platform fails
 
-    # Runner OS is determined by the matrix strategy
     runs-on: ${{ matrix.os }}
 
+    env:
+      CIBW_ARCHS: ${{ matrix.archs }}
+
     steps:
-      # Step 1: Checkout main repository ONLY using default GITHUB_TOKEN
-      # Submodules handled manually later for consistent SSH key usage
       - name: Check out main repository
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      # Step 2: Set up SSH access for private submodule (Bash version)
       - name: Set up SSH access for private submodule (Bash)
         shell: bash
         run: |
@@ -254,48 +45,29 @@ jobs:
           ssh-keygen -l -f ~/.ssh/id_ed25519 || (echo "ERROR: Failed to load key fingerprint. Key format in secret is likely invalid." && exit 1)
           echo "Key loaded successfully by ssh-keygen."
 
-      # Step 3: Configure Git to use SSH instead of HTTPS for GitHub
-      # Using bash shell (available on all runners via Git Bash on Windows)
       - name: Configure Git to use SSH for github.com
         run: git config --global url."git@github.com:".insteadOf "https://github.com/"
         shell: bash
 
-      # Step 4: Initialize and update submodules manually using SSH
-      # Using bash shell
       - name: Initialize submodules
         run: |
           git submodule sync --recursive
           git submodule update --init --recursive
         shell: bash
-        # Source code including the private submodule is now fully checked out
 
-      # Step 5: Set up Python (just need one version to run cibuildwheel itself)
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      # Step 6: Install cibuildwheel
       - name: Install cibuildwheel
         run: python -m pip install --upgrade pip cibuildwheel
 
-      # Step 7: Build wheels using cibuildwheel
-      # Configuration (Python versions, archs, env vars) should be read from pyproject.toml
-      # The specific platform (linux, macos, windows) is passed from the matrix include definition
       - name: Build wheels for ${{ matrix.platform }}
         run: cibuildwheel --platform ${{ matrix.platform }}
-        # IMPORTANT: Make sure your pyproject.toml has the [tool.cibuildwheel] section
-        # configured correctly for all platforms, including Python versions ('build=' key),
-        # architectures ('archs=' key), and any necessary environment variables
-        # (using [tool.cibuildwheel.environment] or platform-specific sections like
-        # [tool.cibuildwheel.linux.environment], etc. for CMAKE_CXX_STANDARD etc.).
 
-      # Step 8: Upload wheels artifact
-      # cibuildwheel output is in './wheelhouse' by default
       - name: Upload wheels (${{ matrix.platform }})
         uses: actions/upload-artifact@v4
         with:
-          # Name the artifact based on the platform from the matrix
-          # This artifact will contain wheels for all Python versions built for this platform
           name: wheels-${{ matrix.platform }}
           path: ./wheelhouse
