@@ -13,7 +13,31 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          submodules: recursive
+          submodules: false
+          
+      - name: Set up SSH access for private submodule (Bash)
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          # Decode if Base64 encoded, otherwise echo directly. Assuming direct key content for now.
+          echo "${{ secrets.SUBMODULE_DEPLOY_KEY }}" | tr -d '\r' > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          echo "SSH key setup complete."
+          # Add a verification step: Try to load the key fingerprint
+          echo "Verifying key load..."
+          ssh-keygen -l -f ~/.ssh/id_ed25519 || (echo "ERROR: Failed to load key fingerprint. Key format in secret is likely invalid." && exit 1)
+          echo "Key loaded successfully by ssh-keygen."
+
+      - name: Configure Git to use SSH for github.com
+        run: git config --global url."git@github.com:".insteadOf "https://github.com/"
+        shell: bash
+
+      - name: Initialize submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive
+        shell: bash
 
       - name: Setup Python
         uses: actions/setup-python@v4
