@@ -8,6 +8,8 @@
 # Licensed under MIT License, see https://opensource.org/license/mit
 ######################################################################
 
+import gc
+import multiprocessing
 import pandas as pd
 import numpy as np
 import polars as pl
@@ -51,8 +53,13 @@ _EPEX_RENAME_MAP = {
 
 _EPEX_DEDUP_COLS = ["OrderId", "InitialId", "ActionCode", "ValidityTime", "Price", "Quantity"]
 
+_EPEX_PRODUCT_FILTERS = {
+    "Hourly": ["Intraday_Hour_Power", "XBID_Hour_Power"],
+    "Quarter-Hourly": ["Intraday_Quarter_Hour_Power", "XBID_Quarter_Hour_Power"],
+}
 
-def _read_raw_epex_file_fast(timestamp: date, datapath: str) -> pl.DataFrame:
+
+def _read_raw_epex_file_fast(timestamp: date, datapath: str, product: str = "Hourly") -> pl.DataFrame:
     """Read and process a single raw EPEX zip file using Polars."""
     year = timestamp.strftime("%Y")
     month = timestamp.strftime("%m")
@@ -71,7 +78,7 @@ def _read_raw_epex_file_fast(timestamp: date, datapath: str) -> pl.DataFrame:
     df = (
         df.unique(subset=_EPEX_DEDUP_COLS, keep="first", maintain_order=True)
         .filter(pl.col("UserDefinedBlock") == "N")
-        .filter(pl.col("Product").is_in(["Intraday_Hour_Power", "XBID_Hour_Power"]))
+        .filter(pl.col("Product").is_in(_EPEX_PRODUCT_FILTERS[product]))
         .filter(pl.col("ActionCode").is_in(["A", "D", "C", "I"]))
         .drop(_EPEX_DROP_COLS)
         .rename(_EPEX_RENAME_MAP)
@@ -88,7 +95,7 @@ def _read_raw_epex_file_fast(timestamp: date, datapath: str) -> pl.DataFrame:
 
     df = df.with_row_index("_idx")
 
-    # Process change messages (shift instead of while loop) 
+    # Process change messages (shift instead of while loop)
     c_orders = df.filter(pl.col("action") == "C")["order"].unique().to_list()
     a_orders = df.filter(pl.col("action") == "A")["order"].unique().to_list()
     orders_to_process = list(set(c_orders) & set(a_orders))
@@ -132,7 +139,7 @@ def _read_raw_epex_file_fast(timestamp: date, datapath: str) -> pl.DataFrame:
             .alias("action")
         )
 
-    # Process cancel messages 
+    # Process cancel messages
     cancel_messages = df.filter(pl.col("action") == "D")
     a_orders_for_cancel = df.filter(pl.col("action") == "A")["order"].unique().to_list()
     cancel_messages = cancel_messages.filter(pl.col("order").is_in(a_orders_for_cancel))
@@ -172,6 +179,116 @@ def _read_raw_epex_file_fast(timestamp: date, datapath: str) -> pl.DataFrame:
     )
 
     return df
+
+
+def _read_raw_files_parallel(
+    dates: list[date],
+    marketdatapath: str,
+    product: str = "Hourly",
+    max_workers: int = 2,
+    verbose: bool = False,
+) -> dict[date, pl.DataFrame]:
+    """Read a batch of raw EPEX files in parallel. Returns dict of date -> DataFrame."""
+    empty_schema = {
+        "initial": pl.Int64, "side": pl.Utf8, "start": pl.Utf8,
+        "transaction": pl.Utf8, "validity": pl.Utf8,
+        "price": pl.Float64, "quantity": pl.Float64,
+    }
+    raw_data: dict[date, pl.DataFrame] = {}
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(_read_raw_epex_file_fast, dt, marketdatapath, product): dt
+            for dt in dates
+        }
+        for future in as_completed(futures):
+            dt = futures[future]
+            try:
+                raw_data[dt] = future.result()
+                if verbose:
+                    print(f"  Read raw file for {dt} ({raw_data[dt].shape[0]} rows)")
+            except Exception as e:
+                print(f"  ERROR reading {dt}: {e}")
+                raw_data[dt] = pl.DataFrame(schema=empty_schema)
+
+    return raw_data
+
+
+def _save_day(dt1: date, raw_data: dict[date, pl.DataFrame], savepath: str, verbose: bool):
+    """Combine raw files for dt1 and dt1+1, filter to transaction date dt1, and save."""
+    dt2 = dt1 + timedelta(days=1)
+    df1 = raw_data.get(dt1, pl.DataFrame())
+    df2 = raw_data.get(dt2, pl.DataFrame())
+
+    frames = [f for f in [df1, df2] if not f.is_empty()]
+    if not frames:
+        if verbose:
+            print(f"  No data for {dt1}, skipping")
+        return
+
+    df = pl.concat(frames)
+
+    df = df.with_columns(
+        pl.col("transaction").str.slice(0, 10).alias("transaction_date"),
+        pl.col("price").cast(pl.Float64).round(2),
+        pl.col("quantity").cast(pl.Float64).round(1),
+    )
+
+    group = df.filter(pl.col("transaction_date") == dt1.isoformat())
+
+    if group.is_empty():
+        if verbose:
+            print(f"  No data for {dt1}, skipping")
+        return
+
+    group = (
+        group.sort("transaction")
+        .with_row_index("")
+        .drop("transaction_date")
+    )
+
+    group = group.with_columns(pl.col("validity").fill_null(""))
+    group = group.select(["", "initial", "side", "start", "transaction", "validity", "price", "quantity"])
+
+    daily_filename = f"orderbook_{dt1}.csv"
+    zip_path = f"{savepath}{daily_filename}.zip"
+
+    buf = StringIO()
+    group.write_csv(buf)
+    csv_bytes = buf.getvalue().encode("utf-8")
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(daily_filename, csv_bytes)
+
+    if verbose:
+        print(f"  Saved {dt1}: {group.shape[0]} rows")
+
+
+def _process_chunk(
+    chunk_start: date,
+    chunk_end: date,
+    marketdatapath: str,
+    savepath: str,
+    product: str,
+    max_workers: int,
+    verbose: bool,
+):
+    """Process a single chunk in a subprocess. All memory is freed when this exits."""
+    raw_dates = []
+    d = chunk_start
+    while d <= chunk_end + timedelta(days=1):
+        raw_dates.append(d)
+        d += timedelta(days=1)
+
+    if verbose:
+        print(f"\n  Chunk {chunk_start} to {chunk_end} ({len(raw_dates)} raw files)")
+
+    raw_data = _read_raw_files_parallel(raw_dates, marketdatapath, product, max_workers, verbose)
+
+    d = chunk_start
+    while d <= chunk_end:
+        _save_day(d, raw_data, savepath, verbose)
+        d += timedelta(days=1)
 
 
 class Data:
@@ -618,12 +735,16 @@ class Data:
         print("\nWriting CSV data completed.")
 
     def parse_market_data_fast(self, start_date_str: str, end_date_str: str, marketdatapath: str,
-                              savepath: str, market_type: str, max_workers: int = 4, verbose: bool = True):
+                              savepath: str, market_type: str, product: str = "Hourly",
+                              max_workers: int = 2, chunk_size: int = 3, verbose: bool = True):
         """
         Fast version of parse_market_data using Polars + parallel raw file reading.
 
         Same interface as parse_market_data, but ~2x faster for EPEX data (2021+ format).
         Currently supports EPEX only. Falls back to parse_market_data for NordPool.
+
+        Processes the date range in chunks of `chunk_size` days to limit memory usage.
+        Each chunk runs in a subprocess so memory is truly freed by the OS between chunks.
 
         Args:
             start_date_str (str): Start date in format "YYYY-MM-DD"
@@ -631,11 +752,16 @@ class Data:
             marketdatapath (str): Path to market data folder with yearly/monthly subfolders
             savepath (str): Directory where processed CSV files will be saved
             market_type (str): "EPEX" or "NordPool" (NordPool falls back to original method)
-            max_workers (int, optional): Number of parallel threads for reading raw files. Defaults to 4.
+            product (str, optional): "Hourly" or "Quarter-Hourly". Defaults to "Hourly".
+            max_workers (int, optional): Number of parallel threads for reading raw files. Defaults to 2.
+            chunk_size (int, optional): Number of target days per chunk. Defaults to 3.
             verbose (bool, optional): Print progress messages. Defaults to True.
         """
         if market_type != "EPEX":
             return self.parse_market_data(start_date_str, end_date_str, marketdatapath, savepath, market_type, verbose)
+
+        if product not in _EPEX_PRODUCT_FILTERS:
+            raise ValueError(f"Unknown product '{product}'. Must be one of: {list(_EPEX_PRODUCT_FILTERS.keys())}")
 
         os.makedirs(savepath, exist_ok=True)
 
@@ -647,96 +773,24 @@ class Data:
         if start.year < 2020:
             raise ValueError("Error: Years before 2020 are not supported.")
 
-        # We need raw files from start through end + 1 day (parsed file of end_date will also be complete, unless end_date + 1 does not exist)
-        all_raw_dates = []
-        d = start
-        while d <= end + timedelta(days=1):
-            all_raw_dates.append(d)
-            d += timedelta(days=1)
-
-        # Parallel read of all raw files
-        raw_data: dict[date, pl.DataFrame] = {}
         t0 = time.time()
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(_read_raw_epex_file_fast, dt, marketdatapath): dt
-                for dt in all_raw_dates
-            }
-            for future in as_completed(futures):
-                dt = futures[future]
-                try:
-                    raw_data[dt] = future.result()
-                    if verbose:
-                        print(f"  Read raw file for {dt} ({raw_data[dt].shape[0]} rows)")
-                except Exception as e:
-                    print(f"  ERROR reading {dt}: {e}")
-                    raw_data[dt] = pl.DataFrame(
-                        schema={
-                            "initial": pl.Int64, "side": pl.Utf8, "start": pl.Utf8,
-                            "transaction": pl.Utf8, "validity": pl.Utf8,
-                            "price": pl.Float64, "quantity": pl.Float64,
-                        }
-                    )
+        # Process in chunks, each in a subprocess so memory is truly freed
+        chunk_start = start
+        while chunk_start <= end:
+            chunk_end = min(chunk_start + timedelta(days=chunk_size - 1), end)
 
-        if verbose:
-            print(f"All raw files read in {time.time() - t0:.1f}s")
-
-        # Sequential: combine adjacent days, group by transaction_date, save
-        target_dates = []
-        d = start
-        while d <= end:
-            target_dates.append(d)
-            d += timedelta(days=1)
-
-        df2 = pl.DataFrame()
-        for dt1 in target_dates:
-            dt2 = dt1 + timedelta(days=1)
-
-            df1 = df2 if not df2.is_empty() else raw_data.get(dt1, pl.DataFrame())
-            df2 = raw_data.get(dt2, pl.DataFrame()) if dt2 <= end + timedelta(days=1) else pl.DataFrame()
-
-            frames = [f for f in [df1, df2] if not f.is_empty()]
-            if not frames:
-                continue
-            df = pl.concat(frames)
-
-            df = df.with_columns(
-                pl.col("transaction").str.slice(0, 10).alias("transaction_date"),
-                pl.col("price").cast(pl.Float64).round(2),
-                pl.col("quantity").cast(pl.Float64).round(1),
+            p = multiprocessing.Process(
+                target=_process_chunk,
+                args=(chunk_start, chunk_end, marketdatapath, savepath, product, max_workers, verbose),
             )
+            p.start()
+            p.join()
 
-            target_str = dt1.isoformat()
-            group = df.filter(pl.col("transaction_date") == target_str)
+            if p.exitcode != 0:
+                raise RuntimeError(f"Chunk {chunk_start} to {chunk_end} failed (exit code {p.exitcode})")
 
-            if group.is_empty():
-                if verbose:
-                    print(f"  No data for {dt1}, skipping")
-                continue
-
-            group = (
-                group.sort("transaction")
-                .with_row_index("")
-                .drop("transaction_date")
-            )
-
-            group = group.with_columns(pl.col("validity").fill_null(""))
-
-            group = group.select(["", "initial", "side", "start", "transaction", "validity", "price", "quantity"])
-
-            daily_filename = f"orderbook_{dt1}.csv"
-            zip_path = f"{savepath}{daily_filename}.zip"
-
-            buf = StringIO()
-            group.write_csv(buf)
-            csv_bytes = buf.getvalue().encode("utf-8")
-
-            with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-                zf.writestr(daily_filename, csv_bytes)
-
-            if verbose:
-                print(f"  Saved {dt1}: {group.shape[0]} rows")
+            chunk_start = chunk_end + timedelta(days=1)
 
         if verbose:
             print(f"\nTotal time: {time.time() - t0:.1f}s")
