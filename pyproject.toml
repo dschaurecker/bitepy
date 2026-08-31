@@ -20,12 +20,12 @@ license = { file = "LICENSE" } # Or use license-files below
 
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "License :: OSI Approved :: MIT License", # Assuming MIT license
     "Operating System :: OS Independent", # Check if this is true, C++ might add dependencies
     "Development Status :: 4 - Beta",
@@ -81,7 +81,7 @@ wheel.packages = ["bitepy"]
 [tool.cibuildwheel]
 # === Configure Python versions here ===
 # Uses CPython identifiers (cp<major><minor>)
-build = ["cp38-*", "cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*"]
+build = ["cp39-*", "cp310-*", "cp311-*", "cp312-*", "cp313-*", "cp314-*"]
 
 skip = [] # Optionally skip specific builds e.g. "*-musllinux_*"
 
