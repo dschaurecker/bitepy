@@ -12,7 +12,8 @@
 
 
 
-A Python high-frequency intraday trading engine for simulating the rolling intrinsic strategy on the European market, solved as a dynamic program. See our paper (tbd, Schaurecker & Wozabal et al. (2025)) for details on the method and visualizations of the results.
+A Python high-frequency intraday trading engine for simulating the rolling intrinsic strategy on the European market, solved as a dynamic program. See our paper ([Schaurecker et al. (2026)](
+https://doi.org/10.1016/j.apenergy.2026.128550)) for details on the method and visualizations of the results.
 
 
 ## Features
@@ -26,7 +27,7 @@ A Python high-frequency intraday trading engine for simulating the rolling intri
 
 ## Installation
 
-BitePy requires Python 3.8+ to run.
+BitePy requires Python 3.9+ to run.
 The package is hosted on [PyPI](https://pypi.org/project/bitepy/) and can be easily installed via
 
 ```sh
